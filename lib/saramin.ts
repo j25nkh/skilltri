@@ -1,5 +1,6 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
+import { parseJobWithAI, JobDetailParsed } from "./openai";
 
 export interface JobPosting {
   title: string;
@@ -109,7 +110,15 @@ function parseJobsFromHtml(html: string, companyName: string): JobPosting[] {
       if (text) conditions.push(text);
     });
 
-    if (title) {
+    // 경력 조건 확인 - 경력만 요구하는 공고 제외
+    const experienceText = conditions.join(" ");
+    const isExperienceOnly =
+      (experienceText.includes("경력") &&
+       !experienceText.includes("신입") &&
+       !experienceText.includes("무관") &&
+       !experienceText.includes("인턴"));
+
+    if (title && !isExperienceOnly) {
       jobPostings.push({
         title,
         company: companyName,
@@ -278,53 +287,102 @@ async function searchSaraminFallback(companyName: string): Promise<CrawlResult> 
   }
 }
 
-export async function getJobDetail(jobUrl: string): Promise<{
-  requirements: string[];
-  preferredQualifications: string[];
-  techStack: string[];
-} | null> {
+/**
+ * relay URL을 직접 view URL로 변환
+ * /jobs/relay/view?rec_idx=123 -> /jobs/view?rec_idx=123
+ */
+function convertToDirectViewUrl(url: string): string {
+  // rec_idx 추출
+  const recIdxMatch = url.match(/rec_idx=(\d+)/);
+  if (recIdxMatch) {
+    return `https://www.saramin.co.kr/zf_user/jobs/view?rec_idx=${recIdxMatch[1]}`;
+  }
+  return url;
+}
+
+/**
+ * 외부 채용 URL 추출
+ * 사람인 페이지 HTML에서 외부 채용사이트 URL 찾기
+ */
+function extractExternalUrl(html: string): string | null {
+  const $ = cheerio.load(html);
+
+  // 1. .jv_howto 영역의 a 태그에서 data-href 추출 (가장 정확)
+  const howtoLink = $('.jv_howto a[data-href]').attr('data-href');
+  if (howtoLink && howtoLink.startsWith('http')) {
+    console.log("Found external URL from .jv_howto:", howtoLink);
+    return howtoLink;
+  }
+
+  // 2. 외부 링크 패턴으로 추출 (data-href 속성에서)
+  const externalLinkMatch = html.match(/data-href="(https?:\/\/[^"]+)"/);
+  if (externalLinkMatch) {
+    console.log("Found external URL from data-href pattern:", externalLinkMatch[1]);
+    return externalLinkMatch[1];
+  }
+
+  return null;
+}
+
+/**
+ * 채용공고 상세 정보 가져오기
+ * 내부 공고: 사람인 HTML → OpenAI 분석
+ * 외부 공고: 외부 URL 추출 → 외부 페이지 fetch → OpenAI 분석
+ */
+export async function getJobDetail(jobUrl: string): Promise<JobDetailParsed | null> {
   try {
-    const response = await axios.get(jobUrl, {
+    // relay URL을 직접 view URL로 변환 (JavaScript 로딩 방지)
+    const directUrl = convertToDirectViewUrl(jobUrl);
+    console.log("Fetching direct URL:", directUrl);
+
+    const response = await axios.get(directUrl, {
       headers: HTTP_HEADERS,
       timeout: 10000,
     });
 
-    const $ = cheerio.load(response.data);
+    const html = response.data;
 
-    const requirements: string[] = [];
-    const preferredQualifications: string[] = [];
-    const techStack: string[] = [];
+    // 홈페이지 지원 (외부 공고) 감지
+    const isExternal = html.includes('title="홈페이지 지원"') ||
+                       html.includes('Saramin.btnJob("homepage"') ||
+                       html.includes("Saramin.btnJob('homepage'");
 
-    // 자격요건 파싱 (jv_cont 섹션에서)
-    $(".jv_cont").each((_, section) => {
-      const $section = $(section);
-      const sectionTitle = $section.find(".tit_job").text().trim();
+    console.log("Is external job posting:", isExternal);
 
-      if (sectionTitle.includes("자격요건") || sectionTitle.includes("필수")) {
-        $section.find("li, p").each((_, item) => {
-          const text = $(item).text().trim();
-          if (text) requirements.push(text);
-        });
+    if (isExternal) {
+      // 외부 URL 추출
+      const externalUrl = extractExternalUrl(html);
+      console.log("External URL:", externalUrl);
+
+      if (externalUrl) {
+        try {
+          // 외부 페이지 fetch
+          const externalResponse = await axios.get(externalUrl, {
+            headers: HTTP_HEADERS,
+            timeout: 15000,
+          });
+          console.log("Successfully fetched external page");
+
+          // 외부 페이지를 OpenAI로 분석
+          const externalResult = await parseJobWithAI(externalResponse.data);
+
+          // 외부 페이지 파싱 결과가 없으면 (SPA 등) 사람인 페이지로 폴백
+          if (externalResult.skills.length === 0 && externalResult.preferredSkills.length === 0) {
+            console.log("External page parsing returned empty, falling back to Saramin page");
+            return await parseJobWithAI(html);
+          }
+
+          return externalResult;
+        } catch (externalError) {
+          console.error("Failed to fetch external URL, falling back to Saramin page:", externalError);
+          // 외부 페이지 fetch 실패 시 사람인 페이지로 폴백
+          return await parseJobWithAI(html);
+        }
       }
+    }
 
-      if (sectionTitle.includes("우대") || sectionTitle.includes("선호")) {
-        $section.find("li, p").each((_, item) => {
-          const text = $(item).text().trim();
-          if (text) preferredQualifications.push(text);
-        });
-      }
-    });
-
-    // 기술 스택 태그 추출
-    $(".col_skill .skill_stack, .stack_list span").each((_, tag) => {
-      techStack.push($(tag).text().trim());
-    });
-
-    return {
-      requirements,
-      preferredQualifications,
-      techStack,
-    };
+    // 내부 공고: 사람인 HTML을 OpenAI로 분석
+    return await parseJobWithAI(html);
   } catch (error) {
     console.error("Job detail crawling error:", error);
     return null;

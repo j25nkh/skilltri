@@ -5,6 +5,11 @@ import { JobPosting } from "@/lib/saramin";
 
 type JobCategory = "개발" | "AI" | "디자인" | "마케팅";
 
+interface JobDetail {
+  skills: string[];           // 필수 스킬 키워드
+  preferredSkills: string[];  // 우대 스킬 키워드
+}
+
 export default function Home() {
   const [company, setCompany] = useState("");
   const [category, setCategory] = useState<JobCategory>("개발");
@@ -12,6 +17,35 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+
+  // 모달 관련 상태
+  const [selectedJob, setSelectedJob] = useState<JobPosting | null>(null);
+  const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const handleJobClick = async (job: JobPosting) => {
+    setSelectedJob(job);
+    setJobDetail(null);
+    setDetailLoading(true);
+
+    try {
+      const res = await fetch(`/api/job-detail?url=${encodeURIComponent(job.link)}`);
+      const data = await res.json();
+
+      if (data.success) {
+        setJobDetail(data.data);
+      }
+    } catch {
+      // 상세 정보 로딩 실패 시 무시
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeModal = () => {
+    setSelectedJob(null);
+    setJobDetail(null);
+  };
 
   const handleSearch = async () => {
     if (!company.trim()) {
@@ -125,12 +159,10 @@ export default function Home() {
               </h2>
               <div className="space-y-4">
                 {results.map((job, index) => (
-                  <a
+                  <div
                     key={index}
-                    href={job.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block bg-white rounded-xl p-6 shadow-md border border-gray-200 hover:shadow-lg hover:border-blue-300 transition-all"
+                    onClick={() => handleJobClick(job)}
+                    className="block bg-white rounded-xl p-6 shadow-md border border-gray-200 hover:shadow-lg hover:border-blue-300 transition-all cursor-pointer"
                   >
                     <div className="flex justify-between items-start mb-3">
                       <div>
@@ -171,7 +203,7 @@ export default function Home() {
                         ))}
                       </div>
                     )}
-                  </a>
+                  </div>
                 ))}
               </div>
             </div>
@@ -184,6 +216,115 @@ export default function Home() {
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* 상세 정보 모달 */}
+      {selectedJob && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          onClick={closeModal}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 모달 헤더 */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-start rounded-t-2xl">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">
+                  {selectedJob.title}
+                </h2>
+                <p className="text-blue-600 font-medium">{selectedJob.company}</p>
+              </div>
+              <button
+                onClick={closeModal}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* 모달 내용 */}
+            <div className="px-6 py-4">
+              {detailLoading ? (
+                <div className="flex justify-center py-12">
+                  <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-600"></div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* 기본 정보 */}
+                  {selectedJob.deadline && (
+                    <div>
+                      <span className="text-gray-500 text-sm">마감일: </span>
+                      <span className="text-gray-900">{selectedJob.deadline}</span>
+                    </div>
+                  )}
+
+                  {/* 필수 스킬 */}
+                  {jobDetail?.skills && jobDetail.skills.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                        필수 스킬
+                        <span className="text-gray-400 font-normal ml-2">배워야 할 기술</span>
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {jobDetail.skills.map((skill, i) => (
+                          <span
+                            key={i}
+                            className="bg-blue-100 text-blue-800 text-sm font-medium px-4 py-2 rounded-full"
+                          >
+                            {skill}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 우대 스킬 */}
+                  {jobDetail?.preferredSkills && jobDetail.preferredSkills.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                        우대 스킬
+                        <span className="text-gray-400 font-normal ml-2">알면 좋은 기술</span>
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {jobDetail.preferredSkills.map((skill, i) => (
+                          <span
+                            key={i}
+                            className="bg-green-100 text-green-800 text-sm font-medium px-4 py-2 rounded-full"
+                          >
+                            {skill}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 상세 정보 없을 때 */}
+                  {!detailLoading && !jobDetail?.skills?.length && !jobDetail?.preferredSkills?.length && (
+                    <p className="text-gray-500 text-center py-4">
+                      스킬 정보를 추출할 수 없습니다.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 모달 푸터 */}
+            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-2xl">
+              <a
+                href={selectedJob.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-lg text-center transition-colors"
+              >
+                사람인에서 보기
+              </a>
+            </div>
+          </div>
         </div>
       )}
     </div>
