@@ -90,17 +90,17 @@ export default function Home() {
       >
         <div></div>
         <div className="flex flex-col items-center justify-center px-8">
-          <h1 className="text-5xl font-bold text-white mb-4">
+          <h1 className="text-5xl font-bold text-white mb-4 animate-fade-in-up">
             Skill<span className="text-blue-400">Tri</span>
           </h1>
-          <p className="text-gray-200 text-lg mb-12 text-center max-w-md">
+          <p className="text-gray-200 text-lg mb-12 text-center max-w-md animate-fade-in-up animation-delay-100">
             원하는 회사의 채용 공고를 분석하여
             <br />
             지금 필요한 역량을 파악하세요
           </p>
 
           {/* Search Form */}
-          <div className="w-full max-w-2xl bg-white/95 backdrop-blur-sm rounded-2xl p-8 shadow-lg border border-gray-200">
+          <div className="w-full max-w-2xl bg-white/95 backdrop-blur-sm rounded-2xl p-8 shadow-lg border border-gray-200 animate-fade-in-up animation-delay-200">
           {/* Category Selection */}
           <div className="mb-6">
             <label className="block text-gray-700 text-sm font-medium mb-3">
