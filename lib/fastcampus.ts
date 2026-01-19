@@ -149,6 +149,7 @@ export async function fetchCoursesFromSitemap(includeMeta: boolean = false): Pro
 
 /**
  * 강의 상세 페이지에서 정보 추출 (Jina AI Reader 사용)
+ * 타임아웃 60초, 최대 3회 재시도
  */
 export async function fetchCourseDetail(slug: string): Promise<{
   title: string;
@@ -157,60 +158,71 @@ export async function fetchCourseDetail(slug: string): Promise<{
 } | null> {
   const pageUrl = `https://fastcampus.co.kr/${slug}`;
   const jinaUrl = `https://r.jina.ai/${pageUrl}`;
-  console.log(`Fetching course detail via Jina: ${jinaUrl}`);
+  const maxRetries = 3;
 
-  try {
-    const response = await axios.get(jinaUrl, {
-      headers: {
-        "Accept": "text/plain",
-        "X-Return-Format": "markdown",
-      },
-      timeout: 30000,
-    });
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`Fetching course detail via Jina (attempt ${attempt}/${maxRetries}): ${slug}`);
 
-    const markdown = response.data as string;
+      const response = await axios.get(jinaUrl, {
+        headers: {
+          "Accept": "text/plain",
+          "X-Return-Format": "markdown",
+        },
+        timeout: 60000,
+      });
 
-    if (!markdown || markdown.length < 100) {
-      console.error("Jina returned empty or too short content");
-      return null;
-    }
+      const markdown = response.data as string;
 
-    // 마크다운에서 제목 추출 (첫 번째 # 헤더)
-    const titleMatch = markdown.match(/^#\s+(.+)$/m);
-    const title = titleMatch ? titleMatch[1].trim() : slug;
+      if (!markdown || markdown.length < 100) {
+        console.error("Jina returned empty or too short content");
+        if (attempt < maxRetries) continue;
+        return null;
+      }
 
-    // 불필요한 부분 제거 (네비게이션, 푸터 등)
-    let content = markdown;
+      // 마크다운에서 제목 추출 (첫 번째 # 헤더)
+      const titleMatch = markdown.match(/^#\s+(.+)$/m);
+      const title = titleMatch ? titleMatch[1].trim() : slug;
 
-    // "Title:" 라인 이후부터 시작
-    const titleLineIndex = content.indexOf("Title:");
-    if (titleLineIndex > -1) {
-      const nextLineIndex = content.indexOf("\n", titleLineIndex);
-      if (nextLineIndex > -1) {
-        content = content.substring(nextLineIndex + 1);
+      // 불필요한 부분 제거 (네비게이션, 푸터 등)
+      let content = markdown;
+
+      // "Title:" 라인 이후부터 시작
+      const titleLineIndex = content.indexOf("Title:");
+      if (titleLineIndex > -1) {
+        const nextLineIndex = content.indexOf("\n", titleLineIndex);
+        if (nextLineIndex > -1) {
+          content = content.substring(nextLineIndex + 1);
+        }
+      }
+
+      // URL Source 라인 제거
+      content = content.replace(/^URL Source:.*$/m, "");
+
+      // Markdown Content 라인 제거
+      content = content.replace(/^Markdown Content:.*$/m, "");
+
+      // 앞뒤 공백 정리
+      content = content.trim();
+
+      console.log(`Successfully fetched course detail, content length: ${content.length}`);
+
+      return {
+        title,
+        content,
+        url: pageUrl,
+      };
+    } catch (error) {
+      console.error(`Attempt ${attempt} failed for ${slug}:`, error instanceof Error ? error.message : error);
+      if (attempt < maxRetries) {
+        console.log(`Retrying in 2 seconds...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
-
-    // URL Source 라인 제거
-    content = content.replace(/^URL Source:.*$/m, "");
-
-    // Markdown Content 라인 제거
-    content = content.replace(/^Markdown Content:.*$/m, "");
-
-    // 앞뒤 공백 정리
-    content = content.trim();
-
-    console.log(`Successfully fetched course detail, content length: ${content.length}`);
-
-    return {
-      title,
-      content,
-      url: pageUrl,
-    };
-  } catch (error) {
-    console.error(`Error fetching course detail for ${slug}:`, error);
-    return null;
   }
+
+  console.error(`All ${maxRetries} attempts failed for ${slug}`);
+  return null;
 }
 
 /**

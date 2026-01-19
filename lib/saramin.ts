@@ -647,7 +647,18 @@ export async function searchCompanyJobs(
             isExperienceOnly: false,
           }));
         } else {
-          console.log(`[Step 4] Jina에서도 공고를 찾지 못함 (${step4Elapsed}초)`);
+          // 3차: Jina도 실패 → 사람인 공고 목록 폴백
+          console.log(`[Step 4] Jina에서도 공고를 찾지 못함, 사람인 폴백...`);
+          const saraminJobs = await crawlCompanyJobs(csn, companyName);
+          const fallbackElapsed = ((performance.now() - step4StartTime) / 1000).toFixed(2);
+          console.log(`[Step 4] 사람인 폴백 완료: ${saraminJobs.length}개 (${fallbackElapsed}초)`);
+          jobs = saraminJobs.map(job => ({
+            originalTitle: job.title,
+            simplifiedTitle: job.title,
+            link: job.link,
+            isRelevant: true,
+            isExperienceOnly: false,
+          }));
         }
       }
     } else {

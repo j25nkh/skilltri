@@ -1,9 +1,16 @@
 import OpenAI from "openai";
 import * as cheerio from "cheerio";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+let openai: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openai;
+}
 
 export interface JobDetailParsed {
   skills: string[];           // 필수 스킬 키워드
@@ -60,7 +67,7 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
   }
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAIClient().chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
@@ -135,7 +142,7 @@ async function filterBatch(
   const startTime = performance.now();
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAIClient().chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
