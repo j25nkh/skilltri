@@ -8,6 +8,17 @@ const openai = new OpenAI({
 export interface JobDetailParsed {
   skills: string[];           // 필수 스킬 키워드
   preferredSkills: string[];  // 우대 스킬 키워드
+  isExternal?: boolean;       // 외부 공고 여부
+  externalUrl?: string;       // 외부 공고 URL
+  rawContent?: string;        // 공고 전문
+}
+
+export interface FilteredJob {
+  originalTitle: string;      // 원본 제목
+  simplifiedTitle: string;    // 정리된 직무명
+  link: string;
+  isRelevant: boolean;        // 선택한 직군과 관련 있는지
+  isExperienceOnly: boolean;  // 경력직만 요구하는지
 }
 
 /**
@@ -34,22 +45,21 @@ function extractTextFromHtml(html: string): string {
  * OpenAI를 사용하여 채용공고 내용 파싱
  */
 export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
+  const startTime = performance.now();
   const text = extractTextFromHtml(html);
 
-  console.log("=== OpenAI Parsing Debug ===");
-  console.log("Text length:", text.length);
-  console.log("Text preview:", text.slice(0, 500));
+  console.log(`[OpenAI] 공고 분석 시작: ${text.length}자`);
 
   if (!text || text.length < 100) {
-    console.log("Text too short, returning empty");
+    console.log("[OpenAI] 텍스트 부족, 스킵");
     return {
       skills: [],
       preferredSkills: [],
+      rawContent: text,
     };
   }
 
   try {
-    console.log("Calling OpenAI API...");
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -81,10 +91,10 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
     });
 
     const content = response.choices[0]?.message?.content;
-    console.log("OpenAI response content:", content);
 
     if (!content) {
-      console.log("No content in response");
+      const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+      console.log(`[OpenAI] 응답 없음 (${elapsed}초)`);
       return {
         skills: [],
         preferredSkills: [],
@@ -92,21 +102,142 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
     }
 
     const parsed = JSON.parse(content);
-    console.log("Parsed result:", parsed);
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+    console.log(`[OpenAI] 공고 분석 완료: 필수 ${parsed.skills?.length || 0}개, 우대 ${parsed.preferredSkills?.length || 0}개 (${elapsed}초)`);
 
     return {
       skills: Array.isArray(parsed.skills) ? parsed.skills : [],
       preferredSkills: Array.isArray(parsed.preferredSkills) ? parsed.preferredSkills : [],
+      rawContent: text,
     };
   } catch (error) {
-    console.error("=== OpenAI API Error ===");
-    console.error("Error:", error);
-    if (error instanceof Error) {
-      console.error("Error message:", error.message);
-    }
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+    console.error(`[OpenAI] 공고 분석 실패 (${elapsed}초):`, error instanceof Error ? error.message : error);
     return {
       skills: [],
       preferredSkills: [],
+      rawContent: text,
     };
   }
+}
+
+/**
+ * 배치 단위로 GPT 필터링 수행
+ */
+async function filterBatch(
+  jobs: { title: string; link: string }[],
+  category: string,
+  startIndex: number,
+  batchNumber: number,
+  totalBatches: number
+): Promise<FilteredJob[]> {
+  const titles = jobs.map((job, idx) => `${idx}. ${job.title}`).join("\n");
+  const startTime = performance.now();
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `채용공고 제목을 분석하여 필터링하세요.
+
+선택된 직군: "${category}"
+
+직군별 관련 키워드:
+- 개발: developer, engineer, backend, frontend, fullstack, 서버, iOS, Android, DevOps, SRE, Node.js, DBA
+- AI: AI, ML, 머신러닝, 딥러닝, data scientist, NLP, MLOps, Data Engineer, Data Analyst
+- 디자인: 디자이너, designer, UX, UI, 프로덕트 디자인, BX, 브랜드
+- 마케팅: 마케팅, 마케터, marketing, 그로스, growth, CRM, 콘텐츠
+
+경력직 키워드: 시니어, senior, lead, manager, 팀장, head, director, CRO, Team Leader
+
+각 공고에 대해 JSON 배열로 응답:
+{"results":[{"i":0,"t":"간결한 직무명","r":true/false,"e":true/false},...]}
+- i: 인덱스
+- t: 간결한 직무명 (예: "Frontend Developer")
+- r: 직군 관련 여부
+- e: 경력직만 요구 여부`,
+        },
+        {
+          role: "user",
+          content: titles,
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      max_tokens: 2500,
+    });
+
+    const content = response.choices[0]?.message?.content;
+
+    if (!content) {
+      throw new Error("Empty response");
+    }
+
+    const parsed = JSON.parse(content);
+    const results = parsed.results || parsed.jobs || parsed;
+
+    if (!Array.isArray(results)) {
+      throw new Error("Invalid format");
+    }
+
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+    console.log(`  [GPT] 배치 ${batchNumber}/${totalBatches} 완료: ${jobs.length}개 (${elapsed}초)`);
+
+    return jobs.map((job, idx) => {
+      const filtered = results.find((r: { i: number }) => r.i === idx) || results[idx];
+      return {
+        originalTitle: job.title,
+        simplifiedTitle: filtered?.t || job.title,
+        link: job.link,
+        isRelevant: filtered?.r ?? true,
+        isExperienceOnly: filtered?.e ?? false,
+      };
+    });
+  } catch (error) {
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+    console.error(`  [GPT] 배치 ${batchNumber}/${totalBatches} 실패 (${elapsed}초):`, error);
+    return jobs.map(job => ({
+      originalTitle: job.title,
+      simplifiedTitle: job.title,
+      link: job.link,
+      isRelevant: true,
+      isExperienceOnly: false,
+    }));
+  }
+}
+
+/**
+ * GPT를 사용하여 공고 목록을 직군별로 필터링하고 직무명 정리
+ * 배치 처리로 토큰 제한 회피
+ */
+export async function filterJobsByCategory(
+  jobs: { title: string; link: string }[],
+  category: string
+): Promise<FilteredJob[]> {
+  if (jobs.length === 0) {
+    return [];
+  }
+
+  const startTime = performance.now();
+  const BATCH_SIZE = 15;
+  const totalBatches = Math.ceil(jobs.length / BATCH_SIZE);
+  const allResults: FilteredJob[] = [];
+
+  console.log(`  [GPT] 필터링 시작: ${jobs.length}개 공고, ${totalBatches}개 배치`);
+
+  // 배치로 나눠서 처리
+  for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
+    const batch = jobs.slice(i, i + BATCH_SIZE);
+    const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+
+    const batchResults = await filterBatch(batch, category, i, batchNumber, totalBatches);
+    allResults.push(...batchResults);
+  }
+
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+  console.log(`  [GPT] 필터링 완료: ${allResults.length}개 처리 (총 ${elapsed}초)`);
+
+  return allResults;
 }

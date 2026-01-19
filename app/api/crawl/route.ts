@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchSaramin } from "@/lib/saramin";
+import { searchCompanyJobs } from "@/lib/saramin";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const company = searchParams.get("company");
+  const category = searchParams.get("category") || "개발";
 
   if (!company) {
     return NextResponse.json(
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const result = await searchSaramin(company);
+  const result = await searchCompanyJobs(company, category);
 
   if (!result.success) {
     return NextResponse.json(result, { status: 500 });
