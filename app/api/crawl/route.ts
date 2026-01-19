@@ -4,7 +4,6 @@ import { searchCompanyJobs } from "@/lib/saramin";
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const company = searchParams.get("company");
-  const category = searchParams.get("category") || "개발";
 
   if (!company) {
     return NextResponse.json(
@@ -13,7 +12,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const result = await searchCompanyJobs(company, category);
+  const result = await searchCompanyJobs(company);
 
   if (!result.success) {
     return NextResponse.json(result, { status: 500 });

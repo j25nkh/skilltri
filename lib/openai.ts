@@ -147,9 +147,10 @@ summary 규칙:
           return { display: s, keyword: s.toLowerCase().replace(/[\s.]/g, '') };
         }
         // 신버전: {display, keyword} 객체
+        const obj = s as { display?: string; keyword?: string };
         return {
-          display: s.display || '',
-          keyword: (s.keyword || s.display || '').toLowerCase().replace(/[\s.]/g, ''),
+          display: obj.display || '',
+          keyword: (obj.keyword || obj.display || '').toLowerCase().replace(/[\s.]/g, ''),
         };
       });
     };

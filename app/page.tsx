@@ -1,9 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-
-type JobCategory = "개발" | "AI" | "디자인" | "마케팅";
 
 interface FilteredJob {
   originalTitle: string;
@@ -24,21 +22,10 @@ interface SearchResult {
 export default function Home() {
   const router = useRouter();
   const [company, setCompany] = useState("");
-  const [category, setCategory] = useState<JobCategory>("개발");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
-
-  // 결과 섹션 ref
-  const resultsRef = useRef<HTMLDivElement>(null);
-
-  // 검색 완료 시 결과 섹션으로 스크롤
-  useEffect(() => {
-    if (searched && !loading && resultsRef.current) {
-      resultsRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [searched, loading]);
 
   // 공고 클릭 핸들러 - 상세 페이지로 이동
   const handleJobClick = (job: FilteredJob) => {
@@ -65,7 +52,7 @@ export default function Home() {
 
     try {
       const res = await fetch(
-        `/api/crawl?company=${encodeURIComponent(company)}&category=${encodeURIComponent(category)}`
+        `/api/crawl?company=${encodeURIComponent(company)}`
       );
       const data: SearchResult = await res.json();
 
@@ -82,90 +69,104 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen">
-      {/* Hero Section */}
+    <div className="min-h-screen bg-gray-50">
+      {/* 배경 이미지 - 검색 후 페이드아웃 */}
       <div
-        className="min-h-screen grid grid-cols-[60%_40%] bg-cover bg-center bg-no-repeat"
+        className={`fixed inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ${
+          searched ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
         style={{ backgroundImage: "url('/Gemini_Generated_Image_pwoawnpwoawnpwoa.png')" }}
-      >
-        <div></div>
-        <div className="flex flex-col items-center justify-center px-8">
-          <h1 className="text-5xl font-bold text-white mb-4 animate-fade-in-up">
-            Skill<span className="text-blue-400">Tri</span>
-          </h1>
-          <p className="text-gray-200 text-lg mb-12 text-center max-w-md animate-fade-in-up animation-delay-100">
-            원하는 회사의 채용 공고를 분석하여
-            <br />
-            지금 필요한 역량을 파악하세요
-          </p>
+      />
 
-          {/* Search Form */}
-          <div className="w-full max-w-2xl bg-white/95 backdrop-blur-sm rounded-2xl p-8 shadow-lg border border-gray-200 animate-fade-in-up animation-delay-200">
-          {/* Category Selection */}
-          <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-medium mb-3">
-              직군 선택
-            </label>
-            <div className="grid grid-cols-4 gap-2">
-              {(["개발", "AI", "디자인", "마케팅"] as JobCategory[]).map(
-                (cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setCategory(cat)}
-                    className={`py-3 px-4 rounded-lg text-sm font-medium transition-all ${
-                      category === cat
-                        ? "bg-blue-600 text-white shadow-md"
-                        : "bg-white text-gray-700 border border-gray-300 hover:border-blue-400 hover:text-blue-600"
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                )
+      {/* 검색 전: 우측 배치 */}
+      {!searched && (
+        <div className="fixed inset-0 z-10 grid grid-cols-[60%_40%]">
+          <div></div>
+          <div className="flex flex-col items-center justify-center px-8">
+            <h1 className="text-5xl font-bold text-white mb-4 animate-fade-in-up">
+              Skill<span className="text-blue-400">Tri</span>
+            </h1>
+            <p className="text-gray-200 text-lg mb-12 text-center max-w-md animate-fade-in-up animation-delay-100">
+              원하는 회사의 채용 공고를 분석하여
+              <br />
+              지금 필요한 역량을 파악하세요
+            </p>
+
+            <div className="w-full max-w-xl animate-fade-in-up animation-delay-200">
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  placeholder="회사명을 입력하세요 (예: 데이원컴퍼니)"
+                  className="flex-1 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl px-5 py-4 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-lg"
+                />
+                <button
+                  onClick={handleSearch}
+                  disabled={loading}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium px-8 py-4 rounded-xl transition-colors shadow-lg"
+                >
+                  검색
+                </button>
+              </div>
+              {error && (
+                <div className="text-red-400 text-sm text-center mt-3">{error}</div>
               )}
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Company Search */}
-          <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-medium mb-3">
-              회사명
-            </label>
-            <div className="flex gap-3">
+      {/* 검색 후: 상단 고정 헤더 */}
+      {searched && (
+        <header className="sticky top-0 z-20 bg-white shadow-md py-4 animate-fade-in">
+          <div className="max-w-4xl mx-auto px-6">
+            <div className="flex gap-3 items-center">
+              <h1
+                onClick={() => {
+                  setSearched(false);
+                  setSearchResult(null);
+                  setCompany("");
+                  setError(null);
+                }}
+                className="text-2xl font-bold text-gray-900 mr-4 whitespace-nowrap cursor-pointer hover:opacity-80 transition-opacity"
+              >
+                Skill<span className="text-blue-500">Tri</span>
+              </h1>
               <input
                 type="text"
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="예: 네이버, 카카오, 토스"
-                className="flex-1 bg-gray-50 border border-gray-300 rounded-lg px-4 py-3 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="회사명을 입력하세요 (예: 데이원컴퍼니)"
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-5 py-3 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
                 onClick={handleSearch}
                 disabled={loading}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium px-8 py-3 rounded-lg transition-colors shadow-md"
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium px-6 py-3 rounded-xl transition-colors"
               >
                 {loading ? "검색 중..." : "검색"}
               </button>
             </div>
+            {error && (
+              <div className="text-red-500 text-sm text-center mt-3">{error}</div>
+            )}
           </div>
+        </header>
+      )}
 
-          {error && (
-            <div className="text-red-500 text-sm text-center">{error}</div>
-          )}
-        </div>
-        </div>
-      </div>
-
-      {/* Results Section */}
+      {/* 결과 영역 */}
       {searched && (
-        <div ref={resultsRef} className="min-h-screen max-w-4xl mx-auto px-4 py-20">
+        <main className="max-w-4xl mx-auto px-6 py-8 animate-fade-in">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-12">
+            <div className="flex flex-col items-center justify-center py-20">
               <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4"></div>
               <p className="text-gray-500">공고를 분석하고 있습니다...</p>
             </div>
           ) : searchResult ? (
-            <>
+            <div>
               {/* 외부 회사 안내 */}
               {searchResult.isExternal && searchResult.externalUrl && (
                 <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-xl">
@@ -193,7 +194,7 @@ export default function Home() {
               {searchResult.jobs.length > 0 ? (
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                    {category} 관련 공고{" "}
+                    채용 공고{" "}
                     <span className={searchResult.isExternal ? "text-orange-600" : "text-blue-600"}>
                       {searchResult.jobs.length}건
                     </span>
@@ -212,6 +213,7 @@ export default function Home() {
                             ? "border-orange-200 hover:border-orange-400"
                             : "border-gray-200 hover:border-blue-300"
                         }`}
+                        style={{ animationDelay: `${index * 50}ms` }}
                       >
                         <div className="flex justify-between items-center">
                           <div>
@@ -222,11 +224,13 @@ export default function Home() {
                               {job.originalTitle}
                             </p>
                           </div>
-                          <span className={`text-xs px-3 py-1 rounded-full ${
-                            searchResult.isExternal
-                              ? "bg-orange-100 text-orange-700"
-                              : "bg-blue-100 text-blue-700"
-                          }`}>
+                          <span
+                            className={`text-xs px-3 py-1 rounded-full ${
+                              searchResult.isExternal
+                                ? "bg-orange-100 text-orange-700"
+                                : "bg-blue-100 text-blue-700"
+                            }`}
+                          >
                             {searchResult.isExternal ? "외부" : "사람인"}
                           </span>
                         </div>
@@ -237,17 +241,16 @@ export default function Home() {
               ) : (
                 <div className="text-center py-12 bg-white rounded-xl shadow-md border border-gray-200">
                   <p className="text-gray-500">
-                    &apos;{company}&apos;의 {category} 관련 채용 공고를 찾을 수 없습니다.
+                    &apos;{company}&apos;의 채용 공고를 찾을 수 없습니다.
                     <br />
-                    <span className="text-sm">다른 직군을 선택하거나 회사명을 확인해보세요.</span>
+                    <span className="text-sm">회사명을 확인해보세요.</span>
                   </p>
                 </div>
               )}
-            </>
+            </div>
           ) : null}
-        </div>
+        </main>
       )}
-
     </div>
   );
 }

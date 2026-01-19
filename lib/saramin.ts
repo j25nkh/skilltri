@@ -570,12 +570,11 @@ export async function getExternalJobDetail(externalJobUrl: string): Promise<JobD
  * 4. 바로 결과 반환 (GPT 필터링 없음)
  */
 export async function searchCompanyJobs(
-  companyName: string,
-  category: string
+  companyName: string
 ): Promise<FilteredSearchResult> {
   const totalStartTime = performance.now();
   console.log("\n========================================");
-  console.log(`🔍 검색 시작: "${companyName}" (${category})`);
+  console.log(`🔍 검색 시작: "${companyName}"`);
   console.log("========================================\n");
 
   try {
