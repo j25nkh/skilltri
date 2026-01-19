@@ -10,9 +10,13 @@ export async function GET(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const sendEvent = (event: string, data: unknown) => {
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-        );
+        try {
+          controller.enqueue(
+            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+          );
+        } catch {
+          // Controller already closed, ignore
+        }
       };
 
       if (!company) {

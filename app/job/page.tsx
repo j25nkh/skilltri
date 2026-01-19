@@ -243,21 +243,38 @@ function JobDetailContent() {
             </h2>
             {data?.jobDetail.summary ? (
               <div className="prose prose-sm max-w-none overflow-auto max-h-[70vh]">
-                <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                <div className="text-sm text-gray-700 leading-relaxed">
                   {data.jobDetail.summary.split('\n').map((line, i) => {
-                    if (line.startsWith('## ')) {
-                      return <h3 key={i} className="text-base font-semibold text-gray-900 mt-4 mb-2">{renderInlineMarkdown(line.replace('## ', ''))}</h3>;
+                    const trimmedLine = line.trim();
+
+                    // 헤딩
+                    if (trimmedLine.startsWith('## ')) {
+                      return <h3 key={i} className="text-base font-semibold text-gray-900 mt-4 mb-2">{renderInlineMarkdown(trimmedLine.slice(3))}</h3>;
                     }
-                    if (line.startsWith('### ')) {
-                      return <h4 key={i} className="text-sm font-semibold text-gray-800 mt-3 mb-1">{renderInlineMarkdown(line.replace('### ', ''))}</h4>;
+                    if (trimmedLine.startsWith('### ')) {
+                      return <h4 key={i} className="text-sm font-semibold text-gray-800 mt-3 mb-1">{renderInlineMarkdown(trimmedLine.slice(4))}</h4>;
                     }
-                    if (line.startsWith('- ')) {
-                      return <li key={i} className="ml-4 mb-1">{renderInlineMarkdown(line.replace('- ', ''))}</li>;
+
+                    // 리스트 아이템 (-, *, •로 시작)
+                    const listMatch = trimmedLine.match(/^[-*•]\s+(.*)$/);
+                    if (listMatch) {
+                      // 중첩 리스트 감지 (원본 라인에서 들여쓰기 확인)
+                      const indent = line.length - line.trimStart().length;
+                      const isNested = indent >= 2;
+                      return (
+                        <li key={i} className={`${isNested ? 'ml-8' : 'ml-4'} mb-1 list-disc`}>
+                          {renderInlineMarkdown(listMatch[1])}
+                        </li>
+                      );
                     }
-                    if (line.trim() === '') {
+
+                    // 빈 줄
+                    if (trimmedLine === '') {
                       return <br key={i} />;
                     }
-                    return <p key={i} className="mb-1">{renderInlineMarkdown(line)}</p>;
+
+                    // 일반 텍스트
+                    return <p key={i} className="mb-1">{renderInlineMarkdown(trimmedLine)}</p>;
                   })}
                 </div>
               </div>
@@ -362,14 +379,19 @@ function SkillWithCourses({
         >
           {skill}
         </span>
-        <div
-          className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden max-w-[100px] cursor-help"
-          title={`공고 연관도 ${relevance}%`}
-        >
-          <div
-            className={`h-full ${barColor} rounded-full transition-all duration-300`}
-            style={{ width: `${relevance}%` }}
-          />
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">직무연관도</span>
+          <div className="flex items-center gap-1.5">
+            <div
+              className="h-2 bg-gray-200 rounded-full overflow-hidden w-16"
+            >
+              <div
+                className={`h-full ${barColor} rounded-full transition-all duration-300`}
+                style={{ width: `${relevance}%` }}
+              />
+            </div>
+            <span className={`text-xs font-medium ${textColor}`}>{relevance}%</span>
+          </div>
         </div>
       </div>
 

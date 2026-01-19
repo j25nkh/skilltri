@@ -1,7 +1,43 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef } from "react";
+import Link from "next/link";
+
+interface CourseMatch {
+  id: number;
+  slug: string;
+  title: string;
+  url: string;
+  category: string;
+  thumbnail: string | null;
+  keywords: string[];
+  match_count: number;
+}
+
+interface SkillItem {
+  display: string;
+  keyword: string;
+  relevance: number;
+}
+
+interface SkillCourses {
+  [skillDisplay: string]: CourseMatch[];
+}
+
+interface JobData {
+  jobDetail: {
+    skills: SkillItem[];
+    preferredSkills: SkillItem[];
+    summary?: string;
+    rawContent?: string;
+    isExternal?: boolean;
+    externalUrl?: string;
+  };
+  matchedCourses: {
+    required: SkillCourses;
+    preferred: SkillCourses;
+  };
+}
 
 interface FilteredJob {
   originalTitle: string;
@@ -23,15 +59,22 @@ interface SearchResult {
 }
 
 export default function Home() {
-  const router = useRouter();
   const [company, setCompany] = useState("");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
-
   const [loadingMessage, setLoadingMessage] = useState("채용 페이지 검색 중...");
+
+  // 공고 상세 관련 상태
+  const [selectedJob, setSelectedJob] = useState<FilteredJob | null>(null);
+  const [jobDetail, setJobDetail] = useState<JobData | null>(null);
+  const [jobDetailLoading, setJobDetailLoading] = useState(false);
+  const [jobDetailStep, setJobDetailStep] = useState(0);
+  const [jobDetailMessage, setJobDetailMessage] = useState("");
+  const detailRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const loadingSteps = [
     "채용 페이지 검색 중...",
@@ -40,16 +83,64 @@ export default function Home() {
     "공고 목록 정리 중...",
   ];
 
-  // 공고 클릭 핸들러 - 상세 페이지로 이동
+  const jobDetailSteps = [
+    "공고 페이지 연결 중...",
+    "공고 내용 가져오는 중...",
+    "AI가 공고 분석 중...",
+    "필수 스킬 추출 중...",
+    "우대 스킬 분석 중...",
+    "추천 강의 매칭 중...",
+    "결과 정리 중...",
+  ];
+
+  // 공고 클릭 핸들러 - 인라인으로 상세 정보 표시
   const handleJobClick = (job: FilteredJob) => {
+    // 같은 공고 다시 클릭 시 접기
+    if (selectedJob?.link === job.link) {
+      setSelectedJob(null);
+      setJobDetail(null);
+      return;
+    }
+
+    // 이전 요청 취소
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    setSelectedJob(job);
+    setJobDetail(null);
+    setJobDetailLoading(true);
+    setJobDetailStep(0);
+    setJobDetailMessage("공고 페이지 연결 중...");
+
     const isExternal = searchResult?.isExternal || false;
-    const params = new URLSearchParams({
-      url: job.link,
-      title: job.originalTitle,
-      simplifiedTitle: job.simplifiedTitle,
-      isExternal: String(isExternal),
+    const apiUrl = `/api/job-with-courses?url=${encodeURIComponent(job.link)}&title=${encodeURIComponent(job.originalTitle)}&isExternal=${isExternal}`;
+    const eventSource = new EventSource(apiUrl);
+    eventSourceRef.current = eventSource;
+
+    eventSource.addEventListener("progress", (event) => {
+      const data = JSON.parse(event.data);
+      setJobDetailStep(data.step);
+      setJobDetailMessage(data.message);
     });
-    router.push(`/job?${params.toString()}`);
+
+    eventSource.addEventListener("complete", (event) => {
+      const result = JSON.parse(event.data);
+      if (result.success) {
+        setJobDetail(result.data);
+      }
+      setJobDetailLoading(false);
+      eventSource.close();
+      // 상세 정보로 스크롤
+      setTimeout(() => {
+        detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    });
+
+    eventSource.addEventListener("error", () => {
+      setJobDetailLoading(false);
+      eventSource.close();
+    });
   };
 
   const handleSearch = (searchCompany?: string) => {
@@ -69,6 +160,8 @@ export default function Home() {
     setError(null);
     setSearched(true);
     setSearchResult(null);
+    setSelectedJob(null);
+    setJobDetail(null);
 
     const apiUrl = `/api/crawl?company=${encodeURIComponent(targetCompany)}`;
     const eventSource = new EventSource(apiUrl);
@@ -251,47 +344,181 @@ export default function Home() {
               {/* 검색 결과 */}
               {searchResult.jobs.length > 0 ? (
                 <div>
-                  <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                    채용 공고{" "}
-                    <span className="text-blue-600">
-                      {searchResult.jobs.length}건
-                    </span>
-                  </h2>
-                  <p className="text-sm text-gray-500 mb-6">
-                    공고를 선택해 {company} 입사에 필요한 스킬을 확인하세요
-                    <span className="block text-xs text-gray-400 mt-1">신입/인턴 지원 가능한 공고만 표시됩니다</span>
-                  </p>
+                  {/* 공고 목록 - 선택된 공고가 없을 때만 표시 */}
+                  {!selectedJob ? (
+                    <>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                        채용 공고{" "}
+                        <span className="text-blue-600">
+                          {searchResult.jobs.length}건
+                        </span>
+                      </h2>
+                      <p className="text-sm text-gray-500 mb-6">
+                        공고를 선택해 {company} 입사에 필요한 스킬을 확인하세요
+                        <span className="block text-xs text-gray-400 mt-1">신입/인턴 지원 가능한 공고만 표시됩니다</span>
+                      </p>
 
-                  <div className="space-y-3">
-                    {searchResult.jobs.map((job, index) => (
-                      <div
-                        key={index}
-                        onClick={() => handleJobClick(job)}
-                        className="bg-white rounded-xl px-5 py-4 shadow-sm border border-gray-200 hover:shadow-md hover:border-blue-300 transition-all cursor-pointer"
-                        style={{ animationDelay: `${index * 30}ms` }}
+                      <div className="space-y-3">
+                        {searchResult.jobs.map((job, index) => (
+                          <div
+                            key={index}
+                            onClick={() => handleJobClick(job)}
+                            className="bg-white rounded-xl px-5 py-4 shadow-sm border border-gray-200 hover:shadow-md hover:border-blue-300 transition-all cursor-pointer"
+                            style={{ animationDelay: `${index * 30}ms` }}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <h3 className="font-medium text-gray-900">
+                                {job.originalTitle}
+                              </h3>
+                              {job.deadline && (
+                                <span className="text-xs text-gray-400 whitespace-nowrap">
+                                  {job.deadline}
+                                </span>
+                              )}
+                            </div>
+                            {job.techStack && job.techStack.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 mt-2">
+                                {job.techStack.map((tech, i) => (
+                                  <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                                    {tech}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    /* 공고 상세 정보 */
+                    <div ref={detailRef}>
+                      {/* 목록으로 돌아가기 버튼 */}
+                      <button
+                        onClick={() => {
+                          setSelectedJob(null);
+                          setJobDetail(null);
+                        }}
+                        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6 group"
                       >
-                        <div className="flex items-start justify-between gap-4">
-                          <h3 className="text-gray-900 font-medium">
-                            {job.originalTitle}
-                          </h3>
-                          {job.deadline && (
-                            <span className="text-xs text-gray-400 whitespace-nowrap">
-                              {job.deadline}
-                            </span>
-                          )}
-                        </div>
-                        {job.techStack && job.techStack.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            {job.techStack.map((tech, i) => (
-                              <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                                {tech}
-                              </span>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                        <span className="text-sm group-hover:underline">공고 목록으로</span>
+                      </button>
+
+                      <h2 className="text-xl font-semibold text-gray-900 mb-6">
+                        {selectedJob.originalTitle}
+                      </h2>
+
+                      {jobDetailLoading ? (
+                        <div className="flex flex-col items-center py-16">
+                          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-600 mb-4"></div>
+                          <p className="text-gray-700 font-medium mb-3">{jobDetailMessage}</p>
+                          <div className="flex items-center justify-center gap-1.5">
+                            {jobDetailSteps.map((_, index) => (
+                              <div
+                                key={index}
+                                className={`h-1.5 rounded-full transition-all duration-300 ${
+                                  index <= jobDetailStep
+                                    ? "w-6 bg-blue-600"
+                                    : "w-1.5 bg-gray-300"
+                                }`}
+                              />
                             ))}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                        </div>
+                      ) : jobDetail ? (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          {/* 좌측: 공고 상세 정보 */}
+                          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                            <h3 className="text-base font-semibold text-gray-900 mb-4">
+                              공고 상세 정보
+                            </h3>
+                            {jobDetail.jobDetail.summary ? (
+                              <div className="prose prose-sm max-w-none overflow-auto max-h-[60vh]">
+                                <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                  {jobDetail.jobDetail.summary.split('\n').map((line, i) => {
+                                    if (line.startsWith('## ')) {
+                                      return <h4 key={i} className="text-base font-semibold text-gray-900 mt-4 mb-2">{line.replace('## ', '')}</h4>;
+                                    }
+                                    if (line.startsWith('### ')) {
+                                      return <h5 key={i} className="text-sm font-semibold text-gray-800 mt-3 mb-1">{line.replace('### ', '')}</h5>;
+                                    }
+                                    if (line.startsWith('- ')) {
+                                      return <li key={i} className="ml-4 mb-1">{line.replace('- ', '')}</li>;
+                                    }
+                                    if (line.trim() === '') {
+                                      return <br key={i} />;
+                                    }
+                                    return <p key={i} className="mb-1">{line}</p>;
+                                  })}
+                                </div>
+                              </div>
+                            ) : jobDetail.jobDetail.rawContent ? (
+                              <div className="prose prose-sm max-w-none">
+                                <pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans leading-relaxed bg-gray-50 p-4 rounded-lg overflow-auto max-h-[60vh]">
+                                  {jobDetail.jobDetail.rawContent}
+                                </pre>
+                              </div>
+                            ) : (
+                              <p className="text-gray-500">공고 내용을 불러올 수 없습니다.</p>
+                            )}
+                          </div>
+
+                          {/* 우측: 스킬 및 강의 */}
+                          <div className="space-y-6">
+                            {/* 필수 스킬 */}
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                              <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+                                필수 스킬
+                                <span className="text-sm font-normal text-gray-400">배워야 할 기술</span>
+                              </h3>
+                              {jobDetail.jobDetail.skills.length > 0 ? (
+                                <div className="space-y-6">
+                                  {jobDetail.jobDetail.skills.map((skill) => (
+                                    <SkillWithCourses
+                                      key={skill.display}
+                                      skill={skill.display}
+                                      relevance={skill.relevance}
+                                      courses={jobDetail.matchedCourses.required[skill.display] || []}
+                                      colorClass="blue"
+                                    />
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-gray-500 text-sm">필수 스킬 정보가 없습니다</p>
+                              )}
+                            </div>
+
+                            {/* 우대 스킬 */}
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                              <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <span className="w-2 h-2 bg-green-600 rounded-full"></span>
+                                우대 스킬
+                                <span className="text-sm font-normal text-gray-400">알면 좋은 기술</span>
+                              </h3>
+                              {jobDetail.jobDetail.preferredSkills.length > 0 ? (
+                                <div className="space-y-6">
+                                  {jobDetail.jobDetail.preferredSkills.map((skill) => (
+                                    <SkillWithCourses
+                                      key={skill.display}
+                                      skill={skill.display}
+                                      relevance={skill.relevance}
+                                      courses={jobDetail.matchedCourses.preferred[skill.display] || []}
+                                      colorClass="green"
+                                    />
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-gray-500 text-sm">우대 스킬 정보가 없습니다</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-12 bg-white rounded-xl shadow-md border border-gray-200">
@@ -305,6 +532,91 @@ export default function Home() {
             </div>
           ) : null}
         </main>
+      )}
+    </div>
+  );
+}
+
+function SkillWithCourses({
+  skill,
+  relevance,
+  courses,
+  colorClass,
+}: {
+  skill: string;
+  relevance: number;
+  courses: CourseMatch[];
+  colorClass: "blue" | "green";
+}) {
+  const bgColor = colorClass === "blue" ? "bg-blue-100" : "bg-green-100";
+  const textColor = colorClass === "blue" ? "text-blue-800" : "text-green-800";
+  const barColor = colorClass === "blue" ? "bg-blue-500" : "bg-green-500";
+
+  return (
+    <div className="border-l-2 border-gray-200 pl-4">
+      <div className="flex items-center gap-3 mb-2">
+        <span
+          className={`inline-block ${bgColor} ${textColor} text-sm font-medium px-3 py-1 rounded-full`}
+        >
+          {skill}
+        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">직무연관도</span>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2 bg-gray-200 rounded-full overflow-hidden w-16">
+              <div
+                className={`h-full ${barColor} rounded-full transition-all duration-300`}
+                style={{ width: `${relevance}%` }}
+              />
+            </div>
+            <span className={`text-xs font-medium ${textColor}`}>{relevance}%</span>
+          </div>
+        </div>
+      </div>
+
+      {courses.length > 0 ? (
+        <div className="space-y-2 mt-2">
+          {courses.map((course) => (
+            <Link
+              key={course.id}
+              href={course.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
+            >
+              <div className="flex items-start gap-3">
+                {course.thumbnail && (
+                  <img
+                    src={course.thumbnail}
+                    alt=""
+                    className="w-16 h-10 object-cover rounded flex-shrink-0"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 group-hover:text-blue-600 line-clamp-2">
+                    {course.title}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">{course.category}</p>
+                </div>
+                <svg
+                  className="w-4 h-4 text-gray-400 group-hover:text-blue-600 flex-shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                  />
+                </svg>
+              </div>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 mt-1">매칭되는 강의가 없습니다</p>
       )}
     </div>
   );

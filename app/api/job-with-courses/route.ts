@@ -18,11 +18,15 @@ export async function GET(request: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      // 이벤트 전송 헬퍼
+      // 이벤트 전송 헬퍼 (controller 닫힌 경우 무시)
       const sendEvent = (event: string, data: unknown) => {
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-        );
+        try {
+          controller.enqueue(
+            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+          );
+        } catch {
+          // Controller already closed, ignore
+        }
       };
 
       if (!url) {
