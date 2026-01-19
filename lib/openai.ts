@@ -13,8 +13,9 @@ function getOpenAIClient(): OpenAI {
 }
 
 export interface SkillItem {
-  display: string;  // 표시용 (한글/원래 형태)
-  keyword: string;  // 매칭용 (영문 소문자, 공백 제거)
+  display: string;    // 표시용 (한글/원래 형태)
+  keyword: string;    // 매칭용 (영문 소문자, 공백 제거)
+  relevance: number;  // 연관성 점수 (0-100)
 }
 
 export interface JobDetailParsed {
@@ -32,6 +33,9 @@ export interface FilteredJob {
   link: string;
   isRelevant: boolean;        // 선택한 직군과 관련 있는지
   isExperienceOnly: boolean;  // 경력직만 요구하는지
+  deadline?: string;          // 마감일
+  techStack?: string[];       // 기술 스택
+  requirements?: string[];    // 조건 (경력, 학력 등)
 }
 
 /**
@@ -56,12 +60,14 @@ function extractTextFromHtml(html: string): string {
 
 /**
  * OpenAI를 사용하여 채용공고 내용 파싱
+ * @param html - 채용공고 HTML
+ * @param keywordPool - 사용 가능한 키워드 목록 (DB에서 가져온 것)
  */
-export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
+export async function parseJobWithAI(html: string, keywordPool?: string[]): Promise<JobDetailParsed> {
   const startTime = performance.now();
   const text = extractTextFromHtml(html);
 
-  console.log(`[OpenAI] 공고 분석 시작: ${text.length}자`);
+  console.log(`[OpenAI] 공고 분석 시작: ${text.length}자, 키워드풀: ${keywordPool?.length || 0}개`);
 
   if (!text || text.length < 100) {
     console.log("[OpenAI] 텍스트 부족, 스킵");
@@ -71,6 +77,11 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
       rawContent: text,
     };
   }
+
+  // 키워드 풀이 있으면 프롬프트에 포함
+  const keywordPoolText = keywordPool && keywordPool.length > 0
+    ? `\n\n**중요: 반드시 아래 키워드 목록에서만 선택하세요:**\n[${keywordPool.join(", ")}]\n\n위 목록에 없는 키워드는 절대 사용하지 마세요.`
+    : "";
 
   try {
     const response = await getOpenAIClient().chat.completions.create({
@@ -83,33 +94,34 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
 출력 형식:
 {
   "skills": [
-    {"display": "브랜딩", "keyword": "branding"},
-    {"display": "Figma", "keyword": "figma"}
+    {"keyword": "figma", "display": "Figma", "relevance": 95},
+    {"keyword": "react", "display": "React", "relevance": 80}
   ],
   "preferredSkills": [
-    {"display": "Adobe Illustrator", "keyword": "adobeillustrator"}
+    {"keyword": "typescript", "display": "TypeScript", "relevance": 70}
   ],
   "summary": "정리된 공고 내용"
 }
 
 각 필드 설명:
-1. skills: 필수 자격요건에서 추출한 기술/도구명
-2. preferredSkills: 우대사항에서 추출한 기술/도구명
+1. skills: 필수 자격요건에서 추출한 기술/도구
+2. preferredSkills: 우대사항에서 추출한 기술/도구
 3. summary: 채용공고 핵심 내용을 마크다운으로 정리
 
 skills/preferredSkills 규칙:
-- display: 원래 표기 그대로 (한글이면 한글, 영문이면 영문)
-- keyword: 영문 소문자, 공백/특수문자 제거
-- 기술명/도구명만 (소프트스킬 제외)
-- 예시:
-  - 브랜딩 → {"display": "브랜딩", "keyword": "branding"}
-  - React.js → {"display": "React.js", "keyword": "react"}
-  - After Effects → {"display": "After Effects", "keyword": "aftereffects"}
-  - 브랜드 커뮤니케이션 → {"display": "브랜드 커뮤니케이션", "keyword": "brandcommunication"}
+- keyword: 기술 키워드 (영문 소문자)
+- display: 표시할 이름 (가독성 좋게)
+- relevance: 이 공고에서 해당 기술의 중요도/연관성 (0-100)
+  - 90-100: 핵심 필수 기술
+  - 70-89: 중요한 기술
+  - 50-69: 언급된 기술
+  - 50 미만: 사용하지 않음
+- 소프트스킬 제외 (협업, 커뮤니케이션 등)
+- relevance가 높은 순으로 정렬${keywordPoolText}
 
 summary 규칙:
 - 주요 업무, 자격 요건, 우대 사항, 복리후생 등 핵심만 포함
-- 네비게이션, 푸터, 회사 소개, 이미지 링크, 저작권 문구 제외
+- 네비게이션, 푸터, 회사 소개 제외
 - 한국어로 깔끔하게 정리
 - 마크다운 헤딩(##)과 리스트(-) 사용`,
         },
@@ -138,21 +150,24 @@ summary 규칙:
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
     console.log(`[OpenAI] 공고 분석 완료: 필수 ${parsed.skills?.length || 0}개, 우대 ${parsed.preferredSkills?.length || 0}개 (${elapsed}초)`);
 
-    // SkillItem 배열로 변환 (구버전 호환성 처리)
+    // SkillItem 배열로 변환
     const normalizeSkills = (skills: unknown[]): SkillItem[] => {
       if (!Array.isArray(skills)) return [];
-      return skills.map((s) => {
-        if (typeof s === 'string') {
-          // 구버전: 문자열만 있는 경우
-          return { display: s, keyword: s.toLowerCase().replace(/[\s.]/g, '') };
-        }
-        // 신버전: {display, keyword} 객체
-        const obj = s as { display?: string; keyword?: string };
-        return {
-          display: obj.display || '',
-          keyword: (obj.keyword || obj.display || '').toLowerCase().replace(/[\s.]/g, ''),
-        };
-      });
+      return skills
+        .map((s) => {
+          if (typeof s === 'string') {
+            return { display: s, keyword: s.toLowerCase().replace(/[\s.]/g, ''), relevance: 50 };
+          }
+          const obj = s as { display?: string; keyword?: string; relevance?: number };
+          return {
+            display: obj.display || obj.keyword || '',
+            keyword: (obj.keyword || obj.display || '').toLowerCase().replace(/[\s.]/g, ''),
+            relevance: obj.relevance || 50,
+          };
+        })
+        .filter((s) => s.keyword && s.relevance >= 50) // relevance 50 이상만
+        .filter((s) => !keywordPool || keywordPool.includes(s.keyword)) // 키워드 풀에 있는 것만
+        .sort((a, b) => b.relevance - a.relevance); // 연관성 높은 순 정렬
     };
 
     return {

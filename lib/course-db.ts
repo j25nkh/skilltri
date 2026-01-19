@@ -203,3 +203,24 @@ export async function getCoursesWithKeywordsCount(): Promise<number> {
     .not("keywords", "eq", "{}");
   return count || 0;
 }
+
+/**
+ * 모든 고유 키워드 풀 추출
+ */
+export async function getKeywordPool(): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from("courses")
+    .select("keywords")
+    .not("keywords", "eq", "{}");
+
+  if (error || !data) {
+    console.error("키워드 풀 조회 실패:", error);
+    return [];
+  }
+
+  // 모든 키워드를 flatten하고 고유값만 추출
+  const allKeywords = data.flatMap((row) => row.keywords || []);
+  const uniqueKeywords = [...new Set(allKeywords)].sort();
+
+  return uniqueKeywords;
+}

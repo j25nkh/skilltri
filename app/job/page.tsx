@@ -18,6 +18,7 @@ interface CourseMatch {
 interface SkillItem {
   display: string;
   keyword: string;
+  relevance: number;
 }
 
 interface SkillCourses {
@@ -72,25 +73,27 @@ function JobDetailContent() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<JobData | null>(null);
 
-  const loadingMessages = [
-    "공고 페이지 가져오는 중...",
+  const [loadingMessage, setLoadingMessage] = useState("공고 페이지 연결 중...");
+
+  const loadingSteps = [
+    "공고 페이지 연결 중...",
+    "공고 내용 가져오는 중...",
     "AI가 공고 분석 중...",
-    "추천 강의 찾는 중...",
+    "필수 스킬 추출 중...",
+    "우대 스킬 분석 중...",
+    "추천 강의 매칭 중...",
+    "결과 정리 중...",
   ];
 
-  // 로딩 단계 타이머
-  useEffect(() => {
-    if (loading) {
-      setLoadingStep(0);
-      const timer1 = setTimeout(() => setLoadingStep(1), 2000);
-      const timer2 = setTimeout(() => setLoadingStep(2), 5000);
-      return () => {
-        clearTimeout(timer1);
-        clearTimeout(timer2);
-      };
-    }
-  }, [loading]);
+  // 인라인 마크다운 처리 (**bold** → <strong>)
+  const renderInlineMarkdown = (text: string) => {
+    const parts = text.split(/\*\*(.+?)\*\*/g);
+    return parts.map((part, i) =>
+      i % 2 === 1 ? <strong key={i} className="font-semibold">{part}</strong> : part
+    );
+  };
 
+  // SSE로 실제 진행 상황 받기
   useEffect(() => {
     if (!url) {
       setError("공고 URL이 없습니다");
@@ -98,25 +101,41 @@ function JobDetailContent() {
       return;
     }
 
-    const fetchData = async () => {
-      try {
-        const apiUrl = `/api/job-with-courses?url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&isExternal=${isExternal}`;
-        const res = await fetch(apiUrl);
-        const result = await res.json();
+    const apiUrl = `/api/job-with-courses?url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&isExternal=${isExternal}`;
+    const eventSource = new EventSource(apiUrl);
 
-        if (result.success) {
-          setData(result.data);
-        } else {
-          setError(result.error || "데이터를 불러올 수 없습니다");
-        }
-      } catch {
-        setError("서버 연결에 실패했습니다");
-      } finally {
-        setLoading(false);
+    eventSource.addEventListener("progress", (event) => {
+      const data = JSON.parse(event.data);
+      setLoadingStep(data.step);
+      setLoadingMessage(data.message);
+    });
+
+    eventSource.addEventListener("complete", (event) => {
+      const result = JSON.parse(event.data);
+      if (result.success) {
+        setData(result.data);
+      } else {
+        setError(result.error || "데이터를 불러올 수 없습니다");
       }
-    };
+      setLoading(false);
+      eventSource.close();
+    });
 
-    fetchData();
+    eventSource.addEventListener("error", (event) => {
+      // SSE 자체 에러 vs 서버에서 보낸 에러 구분
+      if (event instanceof MessageEvent) {
+        const data = JSON.parse(event.data);
+        setError(data.message || "오류가 발생했습니다");
+      } else {
+        setError("서버 연결에 실패했습니다");
+      }
+      setLoading(false);
+      eventSource.close();
+    });
+
+    return () => {
+      eventSource.close();
+    };
   }, [url, title, isExternal]);
 
   if (loading) {
@@ -124,11 +143,11 @@ function JobDetailContent() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-700 font-medium mb-3">{loadingMessages[loadingStep]}</p>
+          <p className="text-gray-700 font-medium mb-3">{loadingMessage}</p>
 
           {/* 진행 단계 표시 */}
           <div className="flex items-center justify-center gap-2 mb-4">
-            {loadingMessages.map((_, index) => (
+            {loadingSteps.map((_, index) => (
               <div
                 key={index}
                 className={`h-2 rounded-full transition-all duration-300 ${
@@ -227,18 +246,18 @@ function JobDetailContent() {
                 <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
                   {data.jobDetail.summary.split('\n').map((line, i) => {
                     if (line.startsWith('## ')) {
-                      return <h3 key={i} className="text-base font-semibold text-gray-900 mt-4 mb-2">{line.replace('## ', '')}</h3>;
+                      return <h3 key={i} className="text-base font-semibold text-gray-900 mt-4 mb-2">{renderInlineMarkdown(line.replace('## ', ''))}</h3>;
                     }
                     if (line.startsWith('### ')) {
-                      return <h4 key={i} className="text-sm font-semibold text-gray-800 mt-3 mb-1">{line.replace('### ', '')}</h4>;
+                      return <h4 key={i} className="text-sm font-semibold text-gray-800 mt-3 mb-1">{renderInlineMarkdown(line.replace('### ', ''))}</h4>;
                     }
                     if (line.startsWith('- ')) {
-                      return <li key={i} className="ml-4 mb-1">{line.replace('- ', '')}</li>;
+                      return <li key={i} className="ml-4 mb-1">{renderInlineMarkdown(line.replace('- ', ''))}</li>;
                     }
                     if (line.trim() === '') {
                       return <br key={i} />;
                     }
-                    return <p key={i} className="mb-1">{line}</p>;
+                    return <p key={i} className="mb-1">{renderInlineMarkdown(line)}</p>;
                   })}
                 </div>
               </div>
@@ -271,6 +290,7 @@ function JobDetailContent() {
                     <SkillWithCourses
                       key={skill.display}
                       skill={skill.display}
+                      relevance={skill.relevance}
                       courses={data.matchedCourses.required[skill.display] || []}
                       colorClass="blue"
                     />
@@ -300,6 +320,7 @@ function JobDetailContent() {
                     <SkillWithCourses
                       key={skill.display}
                       skill={skill.display}
+                      relevance={skill.relevance}
                       courses={data.matchedCourses.preferred[skill.display] || []}
                       colorClass="green"
                     />
@@ -320,23 +341,37 @@ function JobDetailContent() {
 
 function SkillWithCourses({
   skill,
+  relevance,
   courses,
   colorClass,
 }: {
   skill: string;
+  relevance: number;
   courses: CourseMatch[];
   colorClass: "blue" | "green";
 }) {
   const bgColor = colorClass === "blue" ? "bg-blue-100" : "bg-green-100";
   const textColor = colorClass === "blue" ? "text-blue-800" : "text-green-800";
+  const barColor = colorClass === "blue" ? "bg-blue-500" : "bg-green-500";
 
   return (
     <div className="border-l-2 border-gray-200 pl-4">
-      <span
-        className={`inline-block ${bgColor} ${textColor} text-sm font-medium px-3 py-1 rounded-full mb-2`}
-      >
-        {skill}
-      </span>
+      <div className="flex items-center gap-3 mb-2">
+        <span
+          className={`inline-block ${bgColor} ${textColor} text-sm font-medium px-3 py-1 rounded-full`}
+        >
+          {skill}
+        </span>
+        <div
+          className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden max-w-[100px] cursor-help"
+          title={`공고 연관도 ${relevance}%`}
+        >
+          <div
+            className={`h-full ${barColor} rounded-full transition-all duration-300`}
+            style={{ width: `${relevance}%` }}
+          />
+        </div>
+      </div>
 
       {courses.length > 0 ? (
         <div className="space-y-2 mt-2">

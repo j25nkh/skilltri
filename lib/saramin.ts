@@ -461,8 +461,11 @@ function extractExternalUrl(html: string): string | null {
  * 채용공고 상세 정보 가져오기
  * 내부 공고: 사람인 HTML → OpenAI 분석
  * 외부 공고: Jina Reader로 SPA 렌더링 → OpenAI 분석
+ * @param jobUrl - 채용공고 URL
+ * @param jobTitle - 채용공고 제목 (외부 공고 분석 시 사용)
+ * @param keywordPool - 사용 가능한 키워드 목록 (DB에서 가져온 것)
  */
-export async function getJobDetail(jobUrl: string, jobTitle?: string): Promise<JobDetailParsed | null> {
+export async function getJobDetail(jobUrl: string, jobTitle?: string, keywordPool?: string[]): Promise<JobDetailParsed | null> {
   try {
     // relay URL을 직접 view URL로 변환 (JavaScript 로딩 방지)
     const directUrl = convertToDirectViewUrl(jobUrl);
@@ -497,7 +500,7 @@ export async function getJobDetail(jobUrl: string, jobTitle?: string): Promise<J
             console.log("Successfully fetched external page via Jina Reader, length:", externalContent.length);
 
             // 마크다운 텍스트를 OpenAI로 분석
-            const externalResult = await parseJobWithAI(externalContent);
+            const externalResult = await parseJobWithAI(externalContent, keywordPool);
 
             if (externalResult.skills.length > 0 || externalResult.preferredSkills.length > 0) {
               return { ...externalResult, isExternal: true, externalUrl };
@@ -506,23 +509,23 @@ export async function getJobDetail(jobUrl: string, jobTitle?: string): Promise<J
 
           // Jina Reader 실패 시 사람인 페이지로 폴백
           console.log("Jina Reader returned insufficient content, falling back to Saramin page");
-          const fallbackResult = await parseJobWithAI(html);
+          const fallbackResult = await parseJobWithAI(html, keywordPool);
           return { ...fallbackResult, isExternal: true, externalUrl };
         } catch (externalError) {
           console.error("Failed to fetch via Jina Reader:", externalError);
           // 폴백: 사람인 페이지로
-          const fallbackResult = await parseJobWithAI(html);
+          const fallbackResult = await parseJobWithAI(html, keywordPool);
           return { ...fallbackResult, isExternal: true, externalUrl };
         }
       } else if (externalUrl) {
         // jobTitle이 없는 경우 기존 로직 (사람인 페이지 폴백)
-        const fallbackResult = await parseJobWithAI(html);
+        const fallbackResult = await parseJobWithAI(html, keywordPool);
         return { ...fallbackResult, isExternal: true, externalUrl };
       }
     }
 
     // 내부 공고: 사람인 HTML을 OpenAI로 분석
-    const result = await parseJobWithAI(html);
+    const result = await parseJobWithAI(html, keywordPool);
     return { ...result, isExternal: false };
   } catch (error) {
     console.error("Job detail crawling error:", error);
@@ -533,8 +536,10 @@ export async function getJobDetail(jobUrl: string, jobTitle?: string): Promise<J
 /**
  * 외부 공고 URL을 직접 분석
  * 외부 채용 사이트의 상세 페이지 URL을 직접 Jina Reader로 가져와서 분석
+ * @param externalJobUrl - 외부 채용공고 URL
+ * @param keywordPool - 사용 가능한 키워드 목록 (DB에서 가져온 것)
  */
-export async function getExternalJobDetail(externalJobUrl: string): Promise<JobDetailParsed | null> {
+export async function getExternalJobDetail(externalJobUrl: string, keywordPool?: string[]): Promise<JobDetailParsed | null> {
   try {
     console.log("Fetching external job directly:", externalJobUrl);
 
@@ -549,7 +554,7 @@ export async function getExternalJobDetail(externalJobUrl: string): Promise<JobD
     console.log("External job content fetched, length:", content.length);
 
     // OpenAI로 분석
-    const result = await parseJobWithAI(content);
+    const result = await parseJobWithAI(content, keywordPool);
 
     return {
       ...result,
@@ -570,15 +575,21 @@ export async function getExternalJobDetail(externalJobUrl: string): Promise<JobD
  * 4. 바로 결과 반환 (GPT 필터링 없음)
  */
 export async function searchCompanyJobs(
-  companyName: string
+  companyName: string,
+  onProgress?: (step: number, message: string) => void
 ): Promise<FilteredSearchResult> {
   const totalStartTime = performance.now();
   console.log("\n========================================");
   console.log(`🔍 검색 시작: "${companyName}"`);
   console.log("========================================\n");
 
+  const progress = (step: number, message: string) => {
+    if (onProgress) onProgress(step, message);
+  };
+
   try {
     // Step 1: 회사 코드 찾기
+    progress(0, "채용 페이지 검색 중...");
     const csn = await findCompanyCode(companyName);
 
     if (!csn) {
@@ -593,6 +604,7 @@ export async function searchCompanyJobs(
     }
 
     // Step 2: 샘플 공고 1개만 가져오기 (외부/내부 판별용)
+    progress(1, "회사 정보 확인 중...");
     const sampleJob = await getSampleJob(csn, companyName);
 
     if (!sampleJob) {
@@ -606,6 +618,7 @@ export async function searchCompanyJobs(
     }
 
     // Step 3: 샘플 공고로 외부/내부 판별
+    progress(2, "채용 공고 수집 중...");
     const { isExternal, externalUrl } = await checkIfExternalCompany(sampleJob.link);
 
     let jobs: FilteredJob[] = [];
@@ -657,6 +670,9 @@ export async function searchCompanyJobs(
             link: job.link,
             isRelevant: true,
             isExperienceOnly: false,
+            deadline: job.deadline,
+            techStack: job.techStack,
+            requirements: job.requirements,
           }));
         }
       }
@@ -672,8 +688,13 @@ export async function searchCompanyJobs(
         link: job.link,
         isRelevant: true,
         isExperienceOnly: false,
+        deadline: job.deadline,
+        techStack: job.techStack,
+        requirements: job.requirements,
       }));
     }
+
+    progress(3, "공고 목록 정리 중...");
 
     const totalElapsed = ((performance.now() - totalStartTime) / 1000).toFixed(2);
     console.log(`\n========================================`);

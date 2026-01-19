@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 interface FilteredJob {
@@ -9,6 +9,9 @@ interface FilteredJob {
   link: string;
   isRelevant: boolean;
   isExperienceOnly: boolean;
+  deadline?: string;
+  techStack?: string[];
+  requirements?: string[];
 }
 
 interface SearchResult {
@@ -24,8 +27,18 @@ export default function Home() {
   const [company, setCompany] = useState("");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+
+  const [loadingMessage, setLoadingMessage] = useState("채용 페이지 검색 중...");
+
+  const loadingSteps = [
+    "채용 페이지 검색 중...",
+    "회사 정보 확인 중...",
+    "채용 공고 수집 중...",
+    "공고 목록 정리 중...",
+  ];
 
   // 공고 클릭 핸들러 - 상세 페이지로 이동
   const handleJobClick = (job: FilteredJob) => {
@@ -39,37 +52,58 @@ export default function Home() {
     router.push(`/job?${params.toString()}`);
   };
 
-  const handleSearch = async () => {
-    if (!company.trim()) {
+  const handleSearch = (searchCompany?: string) => {
+    const targetCompany = searchCompany || company;
+    if (!targetCompany.trim()) {
       setError("회사명을 입력해주세요");
       return;
     }
 
+    if (searchCompany) {
+      setCompany(searchCompany);
+    }
+
     setLoading(true);
+    setLoadingStep(0);
+    setLoadingMessage("채용 페이지 검색 중...");
     setError(null);
     setSearched(true);
     setSearchResult(null);
 
-    try {
-      const res = await fetch(
-        `/api/crawl?company=${encodeURIComponent(company)}`
-      );
-      const data: SearchResult = await res.json();
+    const apiUrl = `/api/crawl?company=${encodeURIComponent(targetCompany)}`;
+    const eventSource = new EventSource(apiUrl);
 
-      if (data.success) {
-        setSearchResult(data);
+    eventSource.addEventListener("progress", (event) => {
+      const data = JSON.parse(event.data);
+      setLoadingStep(data.step);
+      setLoadingMessage(data.message);
+    });
+
+    eventSource.addEventListener("complete", (event) => {
+      const result = JSON.parse(event.data);
+      if (result.success) {
+        setSearchResult(result.data);
       } else {
-        setError(data.error || "검색 중 오류가 발생했습니다");
+        setError(result.error || "검색 중 오류가 발생했습니다");
       }
-    } catch {
-      setError("서버 연결에 실패했습니다");
-    } finally {
       setLoading(false);
-    }
+      eventSource.close();
+    });
+
+    eventSource.addEventListener("error", (event) => {
+      if (event instanceof MessageEvent) {
+        const data = JSON.parse(event.data);
+        setError(data.message || "오류가 발생했습니다");
+      } else {
+        setError("서버 연결에 실패했습니다");
+      }
+      setLoading(false);
+      eventSource.close();
+    });
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={`min-h-screen transition-colors duration-700 ${searched ? "bg-gray-50" : "bg-black"}`}>
       {/* 배경 이미지 - 검색 후 페이드아웃 */}
       <div
         className={`fixed inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ${
@@ -103,7 +137,7 @@ export default function Home() {
                   className="flex-1 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl px-5 py-4 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-lg"
                 />
                 <button
-                  onClick={handleSearch}
+                  onClick={() => handleSearch()}
                   disabled={loading}
                   className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium px-8 py-4 rounded-xl transition-colors shadow-lg"
                 >
@@ -113,6 +147,19 @@ export default function Home() {
               {error && (
                 <div className="text-red-400 text-sm text-center mt-3">{error}</div>
               )}
+
+              {/* 자주 검색하는 회사 */}
+              <div className="flex flex-wrap gap-2 mt-4 justify-center">
+                {["데이원컴퍼니", "네이버", "카카오", "토스", "쿠팡", "라인"].map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => handleSearch(name)}
+                    className="px-3 py-1.5 text-sm text-white/80 hover:text-white border border-white/30 hover:border-white/60 rounded-full transition-colors"
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -143,16 +190,13 @@ export default function Home() {
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-5 py-3 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
-                onClick={handleSearch}
+                onClick={() => handleSearch()}
                 disabled={loading}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium px-6 py-3 rounded-xl transition-colors"
               >
                 {loading ? "검색 중..." : "검색"}
               </button>
             </div>
-            {error && (
-              <div className="text-red-500 text-sm text-center mt-3">{error}</div>
-            )}
           </div>
         </header>
       )}
@@ -161,33 +205,47 @@ export default function Home() {
       {searched && (
         <main className="max-w-4xl mx-auto px-6 py-8 animate-fade-in">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-20">
+            <div className="flex flex-col items-center justify-center min-h-[70vh]">
               <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4"></div>
-              <p className="text-gray-500">공고를 분석하고 있습니다...</p>
+              <p className="text-gray-700 font-medium mb-3">{loadingMessage}</p>
+
+              {/* 진행 단계 표시 */}
+              <div className="flex items-center justify-center gap-2">
+                {loadingSteps.map((_, index) => (
+                  <div
+                    key={index}
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      index <= loadingStep
+                        ? "w-8 bg-blue-600"
+                        : "w-2 bg-gray-300"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : error ? (
+            <div className="text-center py-12 bg-white rounded-xl shadow-md border border-gray-200">
+              <p className="text-gray-500">
+                {error}
+                <br />
+                <span className="text-sm">회사명을 다시 확인해보세요.</span>
+              </p>
             </div>
           ) : searchResult ? (
             <div>
-              {/* 외부 회사 안내 */}
-              {searchResult.isExternal && searchResult.externalUrl && (
-                <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-xl">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-orange-600 font-semibold">외부 채용 사이트</span>
-                    <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
-                      자체 채용 페이지 운영
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-2">
-                    이 회사는 자체 채용 사이트에서 직접 채용을 진행합니다.
+              {/* 채용 페이지 안내 배너 */}
+              {searchResult.externalUrl && (
+                <a
+                  href={searchResult.externalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between hover:bg-blue-100 transition-colors block"
+                >
+                  <p className="text-sm text-gray-700">
+                    <span className="font-semibold text-blue-600">{company}</span> 채용 페이지에서 더 많은 공고 보기
                   </p>
-                  <a
-                    href={searchResult.externalUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-orange-600 hover:text-orange-700 underline"
-                  >
-                    채용 사이트 바로가기 →
-                  </a>
-                </div>
+                  <span className="text-blue-600 text-sm font-medium">→</span>
+                </a>
               )}
 
               {/* 검색 결과 */}
@@ -195,12 +253,13 @@ export default function Home() {
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
                     채용 공고{" "}
-                    <span className={searchResult.isExternal ? "text-orange-600" : "text-blue-600"}>
+                    <span className="text-blue-600">
                       {searchResult.jobs.length}건
                     </span>
                   </h2>
                   <p className="text-sm text-gray-500 mb-6">
-                    신입/인턴 지원 가능한 공고만 표시됩니다
+                    공고를 선택해 {company} 입사에 필요한 스킬을 확인하세요
+                    <span className="block text-xs text-gray-400 mt-1">신입/인턴 지원 가능한 공고만 표시됩니다</span>
                   </p>
 
                   <div className="space-y-3">
@@ -208,32 +267,28 @@ export default function Home() {
                       <div
                         key={index}
                         onClick={() => handleJobClick(job)}
-                        className={`block bg-white rounded-xl p-5 shadow-md border hover:shadow-lg transition-all cursor-pointer ${
-                          searchResult.isExternal
-                            ? "border-orange-200 hover:border-orange-400"
-                            : "border-gray-200 hover:border-blue-300"
-                        }`}
-                        style={{ animationDelay: `${index * 50}ms` }}
+                        className="bg-white rounded-xl px-5 py-4 shadow-sm border border-gray-200 hover:shadow-md hover:border-blue-300 transition-all cursor-pointer"
+                        style={{ animationDelay: `${index * 30}ms` }}
                       >
-                        <div className="flex justify-between items-center">
-                          <div>
-                            <h3 className="text-lg font-medium text-gray-900">
-                              {job.simplifiedTitle}
-                            </h3>
-                            <p className="text-sm text-gray-500 mt-1">
-                              {job.originalTitle}
-                            </p>
-                          </div>
-                          <span
-                            className={`text-xs px-3 py-1 rounded-full ${
-                              searchResult.isExternal
-                                ? "bg-orange-100 text-orange-700"
-                                : "bg-blue-100 text-blue-700"
-                            }`}
-                          >
-                            {searchResult.isExternal ? "외부" : "사람인"}
-                          </span>
+                        <div className="flex items-start justify-between gap-4">
+                          <h3 className="text-gray-900 font-medium">
+                            {job.originalTitle}
+                          </h3>
+                          {job.deadline && (
+                            <span className="text-xs text-gray-400 whitespace-nowrap">
+                              {job.deadline}
+                            </span>
+                          )}
                         </div>
+                        {job.techStack && job.techStack.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {job.techStack.map((tech, i) => (
+                              <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                                {tech}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
