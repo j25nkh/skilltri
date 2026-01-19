@@ -36,19 +36,22 @@ export async function GET(request: NextRequest) {
       }
 
       try {
-        // 1단계: 공고 페이지 연결 및 키워드 풀 로드
-        sendEvent("progress", { step: 0, message: "공고 페이지 연결 중..." });
+        // 1단계: 키워드 풀 로드
+        sendEvent("progress", { step: 0, message: "강의 데이터를 준비하고 있습니다..." });
 
         // 키워드 풀 로드 (GPT가 이 목록에서만 선택하도록)
         const keywordPool = await getKeywordPool();
         console.log(`[API] 키워드 풀 로드: ${keywordPool.length}개`);
 
-        // 2단계: 공고 내용 가져오기
-        sendEvent("progress", { step: 1, message: "공고 내용 가져오는 중..." });
+        // Progress 콜백 - 함수 내부에서 호출됨
+        const onProgress = (step: number, message: string) => {
+          sendEvent("progress", { step, message });
+        };
 
+        // 2~3단계: 공고 내용 가져오기 + AI 분석 (내부에서 progress 호출)
         const jobDetail = isExternal
-          ? await getExternalJobDetail(url, keywordPool)
-          : await getJobDetail(url, title || undefined, keywordPool);
+          ? await getExternalJobDetail(url, keywordPool, onProgress)
+          : await getJobDetail(url, title || undefined, keywordPool, onProgress);
 
         if (!jobDetail) {
           sendEvent("error", { message: "공고 정보를 가져올 수 없습니다" });
@@ -56,25 +59,18 @@ export async function GET(request: NextRequest) {
           return;
         }
 
-        // 3단계: AI 분석 완료 알림
-        sendEvent("progress", { step: 2, message: "AI가 공고 분석 완료!" });
-
-        // 4단계: 필수 스킬 추출
-        sendEvent("progress", { step: 3, message: "필수 스킬 추출 중..." });
+        // 4단계: 스킬 정리
         const requiredSkills = jobDetail.skills || [];
-
-        // 5단계: 우대 스킬 분석
-        sendEvent("progress", { step: 4, message: "우대 스킬 분석 중..." });
         const preferredSkills = jobDetail.preferredSkills || [];
 
-        // 6단계: 강의 매칭 (중복 제거)
-        sendEvent("progress", { step: 5, message: "추천 강의 매칭 중..." });
+        // 5단계: 강의 매칭 (중복 제거)
+        sendEvent("progress", { step: 4, message: "추천 강의를 매칭하고 있습니다..." });
         const usedCourseIds = new Set<number>();
         const requiredCourses = await matchCoursesForSkills(requiredSkills, usedCourseIds);
         const preferredCourses = await matchCoursesForSkills(preferredSkills, usedCourseIds);
 
-        // 7단계: 결과 정리
-        sendEvent("progress", { step: 6, message: "결과 정리 중..." });
+        // 6단계: 결과 정리
+        sendEvent("progress", { step: 5, message: "결과를 정리하고 있습니다..." });
 
         // 최종 데이터 전송
         sendEvent("complete", {

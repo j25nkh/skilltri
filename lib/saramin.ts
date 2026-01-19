@@ -464,13 +464,24 @@ function extractExternalUrl(html: string): string | null {
  * @param jobUrl - 채용공고 URL
  * @param jobTitle - 채용공고 제목 (외부 공고 분석 시 사용)
  * @param keywordPool - 사용 가능한 키워드 목록 (DB에서 가져온 것)
+ * @param onProgress - 진행 상황 콜백
  */
-export async function getJobDetail(jobUrl: string, jobTitle?: string, keywordPool?: string[]): Promise<JobDetailParsed | null> {
+export async function getJobDetail(
+  jobUrl: string,
+  jobTitle?: string,
+  keywordPool?: string[],
+  onProgress?: (step: number, message: string) => void
+): Promise<JobDetailParsed | null> {
+  const progress = (step: number, message: string) => {
+    if (onProgress) onProgress(step, message);
+  };
+
   try {
     // relay URL을 직접 view URL로 변환 (JavaScript 로딩 방지)
     const directUrl = convertToDirectViewUrl(jobUrl);
     console.log("Fetching direct URL:", directUrl);
 
+    progress(1, "사람인에서 공고 정보를 가져오고 있습니다...");
     const response = await axios.get(directUrl, {
       headers: HTTP_HEADERS,
       timeout: 10000,
@@ -494,38 +505,54 @@ export async function getJobDetail(jobUrl: string, jobTitle?: string, keywordPoo
         try {
           // Jina Reader로 외부 SPA 페이지 렌더링 후 상세 내용 가져오기
           console.log("Fetching external page with Jina Reader...");
-          const externalContent = await fetchExternalJobDetail(externalUrl, jobTitle);
+          progress(1, "외부 채용 페이지에서 공고를 가져오고 있습니다...");
+          const externalContent = await fetchExternalJobDetail(externalUrl, jobTitle, (message) => {
+            // 재시도 메시지만 전달
+            if (message.includes("재시도")) {
+              progress(1, message);
+            }
+          });
 
           if (externalContent && externalContent.length > 500) {
             console.log("Successfully fetched external page via Jina Reader, length:", externalContent.length);
 
             // 마크다운 텍스트를 OpenAI로 분석
+            progress(2, "AI가 공고 내용을 분석하고 있습니다...");
             const externalResult = await parseJobWithAI(externalContent, keywordPool);
 
             if (externalResult.skills.length > 0 || externalResult.preferredSkills.length > 0) {
+              progress(3, "필요한 스킬을 추출했습니다!");
               return { ...externalResult, isExternal: true, externalUrl };
             }
           }
 
           // Jina Reader 실패 시 사람인 페이지로 폴백
           console.log("Jina Reader returned insufficient content, falling back to Saramin page");
+          progress(2, "AI가 공고 내용을 분석하고 있습니다...");
           const fallbackResult = await parseJobWithAI(html, keywordPool);
+          progress(3, "필요한 스킬을 추출했습니다!");
           return { ...fallbackResult, isExternal: true, externalUrl };
         } catch (externalError) {
           console.error("Failed to fetch via Jina Reader:", externalError);
           // 폴백: 사람인 페이지로
+          progress(2, "AI가 공고 내용을 분석하고 있습니다...");
           const fallbackResult = await parseJobWithAI(html, keywordPool);
+          progress(3, "필요한 스킬을 추출했습니다!");
           return { ...fallbackResult, isExternal: true, externalUrl };
         }
       } else if (externalUrl) {
         // jobTitle이 없는 경우 기존 로직 (사람인 페이지 폴백)
+        progress(2, "AI가 공고 내용을 분석하고 있습니다...");
         const fallbackResult = await parseJobWithAI(html, keywordPool);
+        progress(3, "필요한 스킬을 추출했습니다!");
         return { ...fallbackResult, isExternal: true, externalUrl };
       }
     }
 
     // 내부 공고: 사람인 HTML을 OpenAI로 분석
+    progress(2, "AI가 공고 내용을 분석하고 있습니다...");
     const result = await parseJobWithAI(html, keywordPool);
+    progress(3, "필요한 스킬을 추출했습니다!");
     return { ...result, isExternal: false };
   } catch (error) {
     console.error("Job detail crawling error:", error);
@@ -538,13 +565,28 @@ export async function getJobDetail(jobUrl: string, jobTitle?: string, keywordPoo
  * 외부 채용 사이트의 상세 페이지 URL을 직접 Jina Reader로 가져와서 분석
  * @param externalJobUrl - 외부 채용공고 URL
  * @param keywordPool - 사용 가능한 키워드 목록 (DB에서 가져온 것)
+ * @param onProgress - 진행 상황 콜백
  */
-export async function getExternalJobDetail(externalJobUrl: string, keywordPool?: string[]): Promise<JobDetailParsed | null> {
+export async function getExternalJobDetail(
+  externalJobUrl: string,
+  keywordPool?: string[],
+  onProgress?: (step: number, message: string) => void
+): Promise<JobDetailParsed | null> {
+  const progress = (step: number, message: string) => {
+    if (onProgress) onProgress(step, message);
+  };
+
   try {
     console.log("Fetching external job directly:", externalJobUrl);
 
     // Jina Reader로 외부 페이지 가져오기
-    const content = await fetchExternalJobContent(externalJobUrl);
+    progress(1, "외부 채용 페이지에서 공고를 가져오고 있습니다...");
+    const content = await fetchExternalJobContent(externalJobUrl, (message) => {
+      // 재시도 메시지만 전달
+      if (message.includes("재시도")) {
+        progress(1, message);
+      }
+    });
 
     if (!content || content.length < 100) {
       console.log("Failed to fetch external job content");
@@ -554,7 +596,10 @@ export async function getExternalJobDetail(externalJobUrl: string, keywordPool?:
     console.log("External job content fetched, length:", content.length);
 
     // OpenAI로 분석
+    progress(2, "AI가 공고 내용을 분석하고 있습니다...");
     const result = await parseJobWithAI(content, keywordPool);
+
+    progress(3, "필요한 스킬을 추출했습니다!");
 
     return {
       ...result,
@@ -589,7 +634,7 @@ export async function searchCompanyJobs(
 
   try {
     // Step 1: 회사 코드 찾기
-    progress(0, "채용 페이지 검색 중...");
+    progress(0, "사람인에서 회사 정보를 검색하고 있습니다...");
     const csn = await findCompanyCode(companyName);
 
     if (!csn) {
@@ -604,7 +649,7 @@ export async function searchCompanyJobs(
     }
 
     // Step 2: 샘플 공고 1개만 가져오기 (외부/내부 판별용)
-    progress(1, "회사 정보 확인 중...");
+    progress(1, "채용 공고 유형을 확인하고 있습니다...");
     const sampleJob = await getSampleJob(csn, companyName);
 
     if (!sampleJob) {
@@ -618,13 +663,13 @@ export async function searchCompanyJobs(
     }
 
     // Step 3: 샘플 공고로 외부/내부 판별
-    progress(2, "채용 공고 수집 중...");
     const { isExternal, externalUrl } = await checkIfExternalCompany(sampleJob.link);
 
     let jobs: FilteredJob[] = [];
 
     if (isExternal && externalUrl) {
       // Step 4-a: 외부 회사 → Sitemap 시도 후 Jina 폴백
+      progress(2, "자체 채용 사이트가 감지되었습니다...");
       const step4StartTime = performance.now();
       console.log(`[Step 4] 외부 공고 목록 크롤링 시작 (Sitemap 시도)`);
 
@@ -645,8 +690,14 @@ export async function searchCompanyJobs(
       } else {
         // 2차: Sitemap 실패 → Jina Reader 폴백
         console.log(`[Step 4] Sitemap에 개별 공고 없음, Jina Reader로 폴백...`);
+        progress(2, "외부 채용 사이트에서 공고를 조회하고 있습니다...");
 
-        const jinaJobs = await fetchExternalJobList(externalUrl);
+        const jinaJobs = await fetchExternalJobList(externalUrl, (message) => {
+          // Jina 재시도 메시지만 전달
+          if (message.includes("재시도")) {
+            progress(2, message);
+          }
+        });
         const step4Elapsed = ((performance.now() - step4StartTime) / 1000).toFixed(2);
 
         if (jinaJobs.length > 0) {
@@ -661,6 +712,7 @@ export async function searchCompanyJobs(
         } else {
           // 3차: Jina도 실패 → 사람인 공고 목록 폴백
           console.log(`[Step 4] Jina에서도 공고를 찾지 못함, 사람인 폴백...`);
+          progress(2, "사람인에서 공고 목록을 가져오고 있습니다...");
           const saraminJobs = await crawlCompanyJobs(csn, companyName);
           const fallbackElapsed = ((performance.now() - step4StartTime) / 1000).toFixed(2);
           console.log(`[Step 4] 사람인 폴백 완료: ${saraminJobs.length}개 (${fallbackElapsed}초)`);
@@ -678,6 +730,7 @@ export async function searchCompanyJobs(
       }
     } else {
       // Step 4-b: 내부 회사 → 사람인 전체 크롤링
+      progress(2, "사람인에서 공고 목록을 가져오고 있습니다...");
       console.log(`[Step 4] 내부 회사 → 사람인 전체 크롤링 시작`);
       const saraminJobs = await crawlCompanyJobs(csn, companyName);
       console.log(`[Step 4] 사람인 크롤링 완료: ${saraminJobs.length}개`);
@@ -694,7 +747,7 @@ export async function searchCompanyJobs(
       }));
     }
 
-    progress(3, "공고 목록 정리 중...");
+    progress(3, "공고 목록을 정리하고 있습니다...");
 
     const totalElapsed = ((performance.now() - totalStartTime) / 1000).toFixed(2);
     console.log(`\n========================================`);

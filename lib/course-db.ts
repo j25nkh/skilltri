@@ -224,3 +224,95 @@ export async function getKeywordPool(): Promise<string[]> {
 
   return uniqueKeywords;
 }
+
+/**
+ * LLM을 사용하여 기존 키워드 검수 및 개선
+ */
+export async function reviewCourseKeywords(
+  title: string,
+  content: string,
+  currentKeywords: string[]
+): Promise<{ keywords: string[]; changes: { added: string[]; removed: string[] } }> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `IT 강의의 기존 키워드를 검수하고 개선하세요. JSON으로 응답하세요.
+
+검수 기준:
+1. 강의 내용과 실제로 관련 있는 키워드만 유지
+2. 강의에서 다루지 않는 기술은 제거
+3. 누락된 핵심 기술 키워드 추가
+4. 너무 일반적인 키워드 제거 (programming, coding, development 등)
+5. 강의에서 부가적으로 언급만 하는 기술은 제외, 실제로 가르치는 기술만 포함
+
+키워드 규칙:
+- 영문 소문자만 사용 (한글 X)
+- 공백 없이 붙여쓰기 (after effects → aftereffects)
+- 공식 명칭 사용 (react.js → react)
+- 버전 번호 제외 (python3 → python)
+- 프로그래밍 언어, 프레임워크, 라이브러리, 도구명만
+- 최대 15개
+
+응답 형식:
+{
+  "keywords": ["react", "typescript", "nextjs"],
+  "added": ["nextjs"],
+  "removed": ["javascript"]
+}
+
+- keywords: 최종 키워드 목록
+- added: 새로 추가한 키워드
+- removed: 제거한 키워드`,
+        },
+        {
+          role: "user",
+          content: `강의 제목: ${title}
+
+현재 키워드: [${currentKeywords.join(", ")}]
+
+강의 내용:
+${content.slice(0, 6000)}`,
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      max_tokens: 300,
+    });
+
+    const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
+    const keywords = Array.isArray(parsed.keywords)
+      ? parsed.keywords.map((k: string) => k.toLowerCase().replace(/\s+/g, "").trim())
+      : currentKeywords;
+
+    return {
+      keywords,
+      changes: {
+        added: parsed.added || [],
+        removed: parsed.removed || [],
+      },
+    };
+  } catch (error) {
+    console.error("키워드 검수 실패:", error);
+    return { keywords: currentKeywords, changes: { added: [], removed: [] } };
+  }
+}
+
+/**
+ * 키워드가 있는 모든 강의 조회
+ */
+export async function getCoursesWithKeywords(): Promise<CourseRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("courses")
+    .select("*")
+    .not("keywords", "eq", "{}")
+    .order("id");
+
+  if (error) {
+    console.error("조회 실패:", error);
+    return [];
+  }
+  return data || [];
+}

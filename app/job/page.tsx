@@ -73,16 +73,15 @@ function JobDetailContent() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<JobData | null>(null);
 
-  const [loadingMessage, setLoadingMessage] = useState("공고 페이지 연결 중...");
+  const [loadingMessage, setLoadingMessage] = useState("강의 데이터를 준비하고 있습니다...");
 
   const loadingSteps = [
-    "공고 페이지 연결 중...",
-    "공고 내용 가져오는 중...",
-    "AI가 공고 분석 중...",
-    "필수 스킬 추출 중...",
-    "우대 스킬 분석 중...",
-    "추천 강의 매칭 중...",
-    "결과 정리 중...",
+    "강의 데이터를 준비하고 있습니다...",
+    "공고 정보를 가져오고 있습니다...",
+    "AI가 공고 내용을 분석하고 있습니다...",
+    "필요한 스킬을 추출했습니다!",
+    "추천 강의를 매칭하고 있습니다...",
+    "결과를 정리하고 있습니다...",
   ];
 
   // 인라인 마크다운 처리 (**bold** → <strong>)
@@ -372,7 +371,7 @@ function SkillWithCourses({
   const barColor = colorClass === "blue" ? "bg-blue-500" : "bg-green-500";
 
   return (
-    <div className="border-l-2 border-gray-200 pl-4">
+    <div>
       <div className="flex items-center gap-3 mb-2">
         <span
           className={`inline-block ${bgColor} ${textColor} text-sm font-medium px-3 py-1 rounded-full`}
@@ -396,47 +395,70 @@ function SkillWithCourses({
       </div>
 
       {courses.length > 0 ? (
-        <div className="space-y-2 mt-2">
-          {courses.map((course) => (
-            <Link
-              key={course.id}
-              href={course.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
-            >
-              <div className="flex items-start gap-3">
-                {course.thumbnail && (
-                  <img
-                    src={course.thumbnail}
-                    alt=""
-                    className="w-16 h-10 object-cover rounded flex-shrink-0"
+        <div className="relative mt-3 ml-1">
+          {/* 세로 연결선 */}
+          <div
+            className={`absolute left-[5px] top-3 bottom-3 w-0.5 ${
+              colorClass === "blue" ? "bg-blue-200" : "bg-green-200"
+            }`}
+          />
+
+          <div className="space-y-2">
+            {courses.map((course, index) => (
+              <Link
+                key={course.id}
+                href={course.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="relative flex items-start gap-3 group"
+              >
+                {/* 노드 */}
+                <div className="relative z-10 flex-shrink-0 mt-3">
+                  <div
+                    className={`w-3 h-3 rounded-full border-2 bg-white transition-colors ${
+                      colorClass === "blue"
+                        ? "border-blue-400 group-hover:border-blue-600 group-hover:bg-blue-100"
+                        : "border-green-400 group-hover:border-green-600 group-hover:bg-green-100"
+                    }`}
                   />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 group-hover:text-blue-600 line-clamp-2">
-                    {course.title}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {course.category}
-                  </p>
                 </div>
-                <svg
-                  className="w-4 h-4 text-gray-400 group-hover:text-blue-600 flex-shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                  />
-                </svg>
-              </div>
-            </Link>
-          ))}
+
+                {/* 강의 카드 */}
+                <div className="flex-1 p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+                  <div className="flex items-start gap-3">
+                    {course.thumbnail && (
+                      <img
+                        src={course.thumbnail}
+                        alt=""
+                        className="w-16 h-10 object-cover rounded flex-shrink-0"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 group-hover:text-blue-600 line-clamp-2">
+                        {course.title}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {course.category}
+                      </p>
+                    </div>
+                    <svg
+                      className="w-4 h-4 text-gray-400 group-hover:text-blue-600 flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                      />
+                    </svg>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
       ) : (
         <p className="text-xs text-gray-400 mt-1">매칭되는 강의가 없습니다</p>

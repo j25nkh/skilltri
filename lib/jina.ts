@@ -2,31 +2,61 @@ import axios from "axios";
 
 const JINA_READER_BASE = "https://r.jina.ai";
 
+// Jina 요청 중 5초마다 돌아가며 표시할 문구
+const LOADING_MESSAGES = [
+  "외부 채용 페이지에서 공고를 가져오고 있습니다...",
+  "페이지 로딩에 시간이 걸릴 수 있습니다...",
+  "동적 콘텐츠를 불러오는 중입니다...",
+  "조금만 기다려주세요...",
+  "거의 다 가져왔습니다...",
+];
+
 /**
  * Jina AI Reader로 SPA 페이지 렌더링 후 텍스트 추출
- * 재시도 로직 포함
+ * 재시도 로직 포함, 5초마다 문구 변경
+ * @param onProgress - 진행 상황 콜백 (메시지만 전달, step은 상위에서 관리)
  */
 export async function fetchWithJina(
   url: string,
   maxRetries: number = 2,
-  timeout: number = 60000
+  timeout: number = 30000,  // 30초로 단축
+  onProgress?: (message: string) => void
 ): Promise<string> {
   const jinaUrl = `${JINA_READER_BASE}/${url}`;
   const startTime = performance.now();
+  const timeoutSeconds = timeout / 1000;
+
+  const progress = (message: string) => {
+    if (onProgress) onProgress(message);
+  };
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const attemptStartTime = performance.now();
+    let messageIndex = 0;
+    let messageInterval: NodeJS.Timeout | null = null;
+
     try {
       console.log(`  [Jina] 요청 ${attempt}/${maxRetries}: ${url.slice(0, 50)}...`);
+
+      // 초기 메시지
+      progress(LOADING_MESSAGES[0]);
+
+      // 5초마다 문구 변경
+      messageInterval = setInterval(() => {
+        messageIndex = (messageIndex + 1) % LOADING_MESSAGES.length;
+        progress(LOADING_MESSAGES[messageIndex]);
+      }, 5000);
 
       const response = await axios.get(jinaUrl, {
         timeout,
         headers: {
           "Accept": "text/plain",
           "X-Wait-For": "networkidle",  // 네트워크 요청 완료 대기 (동적 콘텐츠)
-          "X-Timeout": "60",            // Jina 측 타임아웃 60초
+          "X-Timeout": String(timeoutSeconds),
         },
       });
+
+      if (messageInterval) clearInterval(messageInterval);
 
       if (response.data && response.data.length > 100) {
         const attemptElapsed = ((performance.now() - attemptStartTime) / 1000).toFixed(2);
@@ -35,11 +65,14 @@ export async function fetchWithJina(
         return response.data;
       }
     } catch (error) {
+      if (messageInterval) clearInterval(messageInterval);
+
       const attemptElapsed = ((performance.now() - attemptStartTime) / 1000).toFixed(2);
       console.error(`  [Jina] 실패 ${attempt}/${maxRetries} (${attemptElapsed}초):`, error instanceof Error ? error.message : error);
 
       if (attempt < maxRetries) {
         console.log(`  [Jina] 2초 후 재시도...`);
+        progress(`연결이 불안정합니다. 재시도 중... (${attempt + 1}/${maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
@@ -142,14 +175,20 @@ export function findJobDetailUrl(
 
 /**
  * 외부 채용 페이지에서 특정 공고 상세 내용 가져오기
+ * @param onProgress - 진행 상황 콜백
  */
 export async function fetchExternalJobDetail(
   externalUrl: string,
-  jobTitle: string
+  jobTitle: string,
+  onProgress?: (message: string) => void
 ): Promise<string> {
+  const progress = (message: string) => {
+    if (onProgress) onProgress(message);
+  };
+
   // 1. 외부 채용 목록 페이지 가져오기 (1회 시도, 30초 타임아웃)
   console.log("Step 1: Fetching external list page...");
-  const listContent = await fetchWithJina(externalUrl, 1, 30000);
+  const listContent = await fetchWithJina(externalUrl, 1, 30000, progress);
 
   if (!listContent || listContent.length < 100) {
     console.log("Failed to fetch external list page");
@@ -165,9 +204,9 @@ export async function fetchExternalJobDetail(
     return "";
   }
 
-  // 3. 상세 페이지 가져오기 (3회 재시도, 60초 타임아웃)
+  // 3. 상세 페이지 가져오기 (3회 재시도, 30초 타임아웃)
   console.log("Step 3: Fetching job detail page...");
-  const detailContent = await fetchWithJina(detailUrl, 3, 60000);
+  const detailContent = await fetchWithJina(detailUrl, 3, 30000, progress);
 
   if (!detailContent || detailContent.length < 100) {
     console.log("Failed to fetch job detail page after retries");
@@ -222,11 +261,15 @@ export function parseExternalJobList(markdownContent: string): ExternalJob[] {
 
 /**
  * 외부 채용 사이트에서 전체 공고 목록 가져오기
+ * @param onProgress - 진행 상황 콜백
  */
-export async function fetchExternalJobList(externalUrl: string): Promise<ExternalJob[]> {
+export async function fetchExternalJobList(
+  externalUrl: string,
+  onProgress?: (message: string) => void
+): Promise<ExternalJob[]> {
   console.log("Fetching external job list from:", externalUrl);
 
-  const content = await fetchWithJina(externalUrl, 2, 30000);
+  const content = await fetchWithJina(externalUrl, 2, 30000, onProgress);
 
   if (!content || content.length < 100) {
     console.log("Failed to fetch external job list");
@@ -238,12 +281,16 @@ export async function fetchExternalJobList(externalUrl: string): Promise<Externa
 
 /**
  * 외부 공고 상세 페이지 URL로 직접 내용 가져오기
- * 타임아웃: 60초, 재시도: 3회
+ * 타임아웃: 30초, 재시도: 3회
+ * @param onProgress - 진행 상황 콜백
  */
-export async function fetchExternalJobContent(jobDetailUrl: string): Promise<string> {
+export async function fetchExternalJobContent(
+  jobDetailUrl: string,
+  onProgress?: (message: string) => void
+): Promise<string> {
   console.log("Fetching external job content from:", jobDetailUrl);
 
-  const content = await fetchWithJina(jobDetailUrl, 3, 60000);
+  const content = await fetchWithJina(jobDetailUrl, 3, 30000, onProgress);
 
   if (!content || content.length < 100) {
     console.log("Failed to fetch external job content");

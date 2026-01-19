@@ -143,15 +143,23 @@ export default function Home() {
     });
   };
 
+  // 회사명 별칭 매핑 (브랜드명 → 법인명)
+  const companyAliases: Record<string, string> = {
+    "토스": "비바리퍼블리카",
+  };
+
   const handleSearch = (searchCompany?: string) => {
-    const targetCompany = searchCompany || company;
-    if (!targetCompany.trim()) {
+    const inputCompany = searchCompany || company;
+    if (!inputCompany.trim()) {
       setError("회사명을 입력해주세요");
       return;
     }
 
+    // 별칭이 있으면 실제 회사명으로 변환
+    const targetCompany = companyAliases[inputCompany] || inputCompany;
+
     if (searchCompany) {
-      setCompany(searchCompany);
+      setCompany(searchCompany); // UI에는 입력한 이름 표시
     }
 
     setLoading(true);
@@ -355,7 +363,6 @@ export default function Home() {
                       </h2>
                       <p className="text-sm text-gray-500 mb-6">
                         공고를 선택해 {company} 입사에 필요한 스킬을 확인하세요
-                        <span className="block text-xs text-gray-400 mt-1">신입/인턴 지원 가능한 공고만 표시됩니다</span>
                       </p>
 
                       <div className="space-y-3">
