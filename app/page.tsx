@@ -82,20 +82,25 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+    <div className="min-h-screen">
       {/* Hero Section */}
-      <div className="min-h-screen flex flex-col items-center justify-center px-4">
-        <h1 className="text-5xl font-bold text-gray-900 mb-4">
-          Skill<span className="text-blue-600">Tri</span>
-        </h1>
-        <p className="text-gray-600 text-lg mb-12 text-center max-w-md">
-          원하는 회사의 채용 공고를 분석하여
-          <br />
-          지금 필요한 역량을 파악하세요
-        </p>
+      <div
+        className="min-h-screen grid grid-cols-[60%_40%] bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/Gemini_Generated_Image_pwoawnpwoawnpwoa.png')" }}
+      >
+        <div></div>
+        <div className="flex flex-col items-center justify-center px-8">
+          <h1 className="text-5xl font-bold text-white mb-4">
+            Skill<span className="text-blue-400">Tri</span>
+          </h1>
+          <p className="text-gray-200 text-lg mb-12 text-center max-w-md">
+            원하는 회사의 채용 공고를 분석하여
+            <br />
+            지금 필요한 역량을 파악하세요
+          </p>
 
-        {/* Search Form */}
-        <div className="w-full max-w-2xl bg-white rounded-2xl p-8 shadow-lg border border-gray-200">
+          {/* Search Form */}
+          <div className="w-full max-w-2xl bg-white/95 backdrop-blur-sm rounded-2xl p-8 shadow-lg border border-gray-200">
           {/* Category Selection */}
           <div className="mb-6">
             <label className="block text-gray-700 text-sm font-medium mb-3">
@@ -110,7 +115,7 @@ export default function Home() {
                     className={`py-3 px-4 rounded-lg text-sm font-medium transition-all ${
                       category === cat
                         ? "bg-blue-600 text-white shadow-md"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        : "bg-white text-gray-700 border border-gray-300 hover:border-blue-400 hover:text-blue-600"
                     }`}
                   >
                     {cat}
@@ -147,6 +152,7 @@ export default function Home() {
           {error && (
             <div className="text-red-500 text-sm text-center">{error}</div>
           )}
+        </div>
         </div>
       </div>
 

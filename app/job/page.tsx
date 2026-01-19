@@ -23,6 +23,7 @@ interface JobData {
   jobDetail: {
     skills: string[];
     preferredSkills: string[];
+    summary?: string;
     rawContent?: string;
     isExternal?: boolean;
     externalUrl?: string;
@@ -43,8 +44,28 @@ export default function JobDetailPage() {
   const isExternal = searchParams.get("isExternal") === "true";
 
   const [loading, setLoading] = useState(true);
+  const [loadingStep, setLoadingStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<JobData | null>(null);
+
+  const loadingMessages = [
+    "공고 페이지 가져오는 중...",
+    "AI가 공고 분석 중...",
+    "추천 강의 찾는 중...",
+  ];
+
+  // 로딩 단계 타이머
+  useEffect(() => {
+    if (loading) {
+      setLoadingStep(0);
+      const timer1 = setTimeout(() => setLoadingStep(1), 2000);
+      const timer2 = setTimeout(() => setLoadingStep(2), 5000);
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
+    }
+  }, [loading]);
 
   useEffect(() => {
     if (!url) {
@@ -79,9 +100,24 @@ export default function JobDetailPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-500">공고를 분석하고 있습니다...</p>
+          <p className="text-gray-700 font-medium mb-3">{loadingMessages[loadingStep]}</p>
+
+          {/* 진행 단계 표시 */}
+          <div className="flex items-center justify-center gap-2 mb-4">
+            {loadingMessages.map((_, index) => (
+              <div
+                key={index}
+                className={`h-2 rounded-full transition-all duration-300 ${
+                  index <= loadingStep
+                    ? "w-8 bg-blue-600"
+                    : "w-2 bg-gray-300"
+                }`}
+              />
+            ))}
+          </div>
+
           {isExternal && (
-            <p className="text-gray-400 text-sm mt-2">
+            <p className="text-gray-400 text-sm">
               외부 페이지 분석에 시간이 걸릴 수 있습니다
             </p>
           )}
@@ -162,7 +198,27 @@ export default function JobDetailPage() {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">
               공고 상세 정보
             </h2>
-            {data?.jobDetail.rawContent ? (
+            {data?.jobDetail.summary ? (
+              <div className="prose prose-sm max-w-none overflow-auto max-h-[70vh]">
+                <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                  {data.jobDetail.summary.split('\n').map((line, i) => {
+                    if (line.startsWith('## ')) {
+                      return <h3 key={i} className="text-base font-semibold text-gray-900 mt-4 mb-2">{line.replace('## ', '')}</h3>;
+                    }
+                    if (line.startsWith('### ')) {
+                      return <h4 key={i} className="text-sm font-semibold text-gray-800 mt-3 mb-1">{line.replace('### ', '')}</h4>;
+                    }
+                    if (line.startsWith('- ')) {
+                      return <li key={i} className="ml-4 mb-1">{line.replace('- ', '')}</li>;
+                    }
+                    if (line.trim() === '') {
+                      return <br key={i} />;
+                    }
+                    return <p key={i} className="mb-1">{line}</p>;
+                  })}
+                </div>
+              </div>
+            ) : data?.jobDetail.rawContent ? (
               <div className="prose prose-sm max-w-none">
                 <pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans leading-relaxed bg-gray-50 p-4 rounded-lg overflow-auto max-h-[70vh]">
                   {data.jobDetail.rawContent}

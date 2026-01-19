@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
         jobDetail: {
           skills: requiredSkills,
           preferredSkills: preferredSkills,
+          summary: jobDetail.summary,
           rawContent: jobDetail.rawContent,
           isExternal: jobDetail.isExternal,
           externalUrl: jobDetail.externalUrl,

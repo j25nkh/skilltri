@@ -15,9 +15,10 @@ function getOpenAIClient(): OpenAI {
 export interface JobDetailParsed {
   skills: string[];           // 필수 스킬 키워드
   preferredSkills: string[];  // 우대 스킬 키워드
+  summary?: string;           // GPT가 정리한 공고 내용
   isExternal?: boolean;       // 외부 공고 여부
   externalUrl?: string;       // 외부 공고 URL
-  rawContent?: string;        // 공고 전문
+  rawContent?: string;        // 공고 전문 (디버깅용)
 }
 
 export interface FilteredJob {
@@ -72,20 +73,29 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
       messages: [
         {
           role: "system",
-          content: `당신은 채용공고 분석 전문가입니다. 취업 준비생이 학습해야 할 기술 키워드를 추출하세요.
+          content: `당신은 채용공고 분석 전문가입니다. 채용공고를 분석하여 JSON으로 응답하세요.
 
-다음 두 카테고리로 분류해서 JSON으로 응답하세요:
-1. skills: 필수로 알아야 할 기술 (자격요건에서 추출)
-2. preferredSkills: 알면 좋은 기술 (우대사항에서 추출)
+출력 형식:
+{
+  "skills": ["기술1", "기술2"],
+  "preferredSkills": ["기술3", "기술4"],
+  "summary": "정리된 공고 내용"
+}
 
-규칙:
-- 기술명/도구명만 추출 (예: "React", "Python", "Docker", "AWS", "Git", "Figma")
-- 일반적인 표현 제외 (예: "협업 능력", "커뮤니케이션", "문제 해결 능력", "책임감")
-- 중복 제거
-- 빈 배열도 허용
+각 필드 설명:
+1. skills: 필수 자격요건에서 추출한 기술/도구명
+2. preferredSkills: 우대사항에서 추출한 기술/도구명
+3. summary: 채용공고 핵심 내용을 마크다운으로 정리
 
-예시 응답:
-{"skills": ["React", "TypeScript", "Node.js"], "preferredSkills": ["Docker", "AWS", "GraphQL"]}`,
+skills/preferredSkills 규칙:
+- 기술명/도구명만 (예: React, Python, Docker, AWS, Figma)
+- 소프트스킬 제외 (협업 능력, 커뮤니케이션 등)
+
+summary 규칙:
+- 주요 업무, 자격 요건, 우대 사항, 복리후생 등 핵심만 포함
+- 네비게이션, 푸터, 회사 소개, 이미지 링크, 저작권 문구 제외
+- 한국어로 깔끔하게 정리
+- 마크다운 헤딩(##)과 리스트(-) 사용`,
         },
         {
           role: "user",
@@ -94,7 +104,7 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
       ],
       response_format: { type: "json_object" },
       temperature: 0.3,
-      max_tokens: 500,
+      max_tokens: 2000,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -115,6 +125,7 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
     return {
       skills: Array.isArray(parsed.skills) ? parsed.skills : [],
       preferredSkills: Array.isArray(parsed.preferredSkills) ? parsed.preferredSkills : [],
+      summary: parsed.summary || undefined,
       rawContent: text,
     };
   } catch (error) {
