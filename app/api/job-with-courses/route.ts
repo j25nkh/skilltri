@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getJobDetail, getExternalJobDetail } from "@/lib/saramin";
 import { findCoursesByKeywords } from "@/lib/course-db";
 import { CourseWithMatchCount } from "@/lib/supabase";
+import { SkillItem } from "@/lib/openai";
 
 interface SkillCourses {
-  [skill: string]: CourseWithMatchCount[];
+  [skillDisplay: string]: CourseWithMatchCount[];
 }
 
 export async function GET(request: NextRequest) {
@@ -69,23 +70,23 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function matchCoursesForSkills(skills: string[]): Promise<SkillCourses> {
+async function matchCoursesForSkills(skills: SkillItem[]): Promise<SkillCourses> {
   if (skills.length === 0) return {};
 
   const result: SkillCourses = {};
 
-  // 모든 스킬을 한 번에 검색해서 효율성 높이기
-  const allCourses = await findCoursesByKeywords(skills);
+  // 모든 스킬의 keyword를 추출해서 한 번에 검색
+  const keywords = skills.map((s) => s.keyword);
+  const allCourses = await findCoursesByKeywords(keywords);
 
-  // 각 스킬별로 매칭되는 강의 분류
+  // 각 스킬별로 매칭되는 강의 분류 (display를 키로 사용)
   for (const skill of skills) {
-    const normalizedSkill = skill.toLowerCase().trim();
     const matchingCourses = allCourses.filter((course) =>
       course.keywords.some(
-        (keyword) => keyword.toLowerCase() === normalizedSkill
+        (keyword) => keyword.toLowerCase() === skill.keyword
       )
     );
-    result[skill] = matchingCourses.slice(0, 5); // 스킬당 최대 5개 강의
+    result[skill.display] = matchingCourses.slice(0, 5); // 스킬당 최대 5개 강의
   }
 
   return result;

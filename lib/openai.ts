@@ -12,13 +12,18 @@ function getOpenAIClient(): OpenAI {
   return openai;
 }
 
+export interface SkillItem {
+  display: string;  // 표시용 (한글/원래 형태)
+  keyword: string;  // 매칭용 (영문 소문자, 공백 제거)
+}
+
 export interface JobDetailParsed {
-  skills: string[];           // 필수 스킬 키워드
-  preferredSkills: string[];  // 우대 스킬 키워드
-  summary?: string;           // GPT가 정리한 공고 내용
-  isExternal?: boolean;       // 외부 공고 여부
-  externalUrl?: string;       // 외부 공고 URL
-  rawContent?: string;        // 공고 전문 (디버깅용)
+  skills: SkillItem[];           // 필수 스킬
+  preferredSkills: SkillItem[];  // 우대 스킬
+  summary?: string;              // GPT가 정리한 공고 내용
+  isExternal?: boolean;          // 외부 공고 여부
+  externalUrl?: string;          // 외부 공고 URL
+  rawContent?: string;           // 공고 전문 (디버깅용)
 }
 
 export interface FilteredJob {
@@ -61,8 +66,8 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
   if (!text || text.length < 100) {
     console.log("[OpenAI] 텍스트 부족, 스킵");
     return {
-      skills: [],
-      preferredSkills: [],
+      skills: [] as SkillItem[],
+      preferredSkills: [] as SkillItem[],
       rawContent: text,
     };
   }
@@ -77,8 +82,13 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
 
 출력 형식:
 {
-  "skills": ["기술1", "기술2"],
-  "preferredSkills": ["기술3", "기술4"],
+  "skills": [
+    {"display": "브랜딩", "keyword": "branding"},
+    {"display": "Figma", "keyword": "figma"}
+  ],
+  "preferredSkills": [
+    {"display": "Adobe Illustrator", "keyword": "adobeillustrator"}
+  ],
   "summary": "정리된 공고 내용"
 }
 
@@ -88,8 +98,14 @@ export async function parseJobWithAI(html: string): Promise<JobDetailParsed> {
 3. summary: 채용공고 핵심 내용을 마크다운으로 정리
 
 skills/preferredSkills 규칙:
-- 기술명/도구명만 (예: React, Python, Docker, AWS, Figma)
-- 소프트스킬 제외 (협업 능력, 커뮤니케이션 등)
+- display: 원래 표기 그대로 (한글이면 한글, 영문이면 영문)
+- keyword: 영문 소문자, 공백/특수문자 제거
+- 기술명/도구명만 (소프트스킬 제외)
+- 예시:
+  - 브랜딩 → {"display": "브랜딩", "keyword": "branding"}
+  - React.js → {"display": "React.js", "keyword": "react"}
+  - After Effects → {"display": "After Effects", "keyword": "aftereffects"}
+  - 브랜드 커뮤니케이션 → {"display": "브랜드 커뮤니케이션", "keyword": "brandcommunication"}
 
 summary 규칙:
 - 주요 업무, 자격 요건, 우대 사항, 복리후생 등 핵심만 포함
@@ -113,8 +129,8 @@ summary 규칙:
       const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
       console.log(`[OpenAI] 응답 없음 (${elapsed}초)`);
       return {
-        skills: [],
-        preferredSkills: [],
+        skills: [] as SkillItem[],
+        preferredSkills: [] as SkillItem[],
       };
     }
 
@@ -122,9 +138,25 @@ summary 규칙:
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
     console.log(`[OpenAI] 공고 분석 완료: 필수 ${parsed.skills?.length || 0}개, 우대 ${parsed.preferredSkills?.length || 0}개 (${elapsed}초)`);
 
+    // SkillItem 배열로 변환 (구버전 호환성 처리)
+    const normalizeSkills = (skills: unknown[]): SkillItem[] => {
+      if (!Array.isArray(skills)) return [];
+      return skills.map((s) => {
+        if (typeof s === 'string') {
+          // 구버전: 문자열만 있는 경우
+          return { display: s, keyword: s.toLowerCase().replace(/[\s.]/g, '') };
+        }
+        // 신버전: {display, keyword} 객체
+        return {
+          display: s.display || '',
+          keyword: (s.keyword || s.display || '').toLowerCase().replace(/[\s.]/g, ''),
+        };
+      });
+    };
+
     return {
-      skills: Array.isArray(parsed.skills) ? parsed.skills : [],
-      preferredSkills: Array.isArray(parsed.preferredSkills) ? parsed.preferredSkills : [],
+      skills: normalizeSkills(parsed.skills),
+      preferredSkills: normalizeSkills(parsed.preferredSkills),
       summary: parsed.summary || undefined,
       rawContent: text,
     };
@@ -132,8 +164,8 @@ summary 규칙:
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
     console.error(`[OpenAI] 공고 분석 실패 (${elapsed}초):`, error instanceof Error ? error.message : error);
     return {
-      skills: [],
-      preferredSkills: [],
+      skills: [] as SkillItem[],
+      preferredSkills: [] as SkillItem[],
       rawContent: text,
     };
   }

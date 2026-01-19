@@ -15,14 +15,19 @@ interface CourseMatch {
   match_count: number;
 }
 
+interface SkillItem {
+  display: string;
+  keyword: string;
+}
+
 interface SkillCourses {
-  [skill: string]: CourseMatch[];
+  [skillDisplay: string]: CourseMatch[];
 }
 
 interface JobData {
   jobDetail: {
-    skills: string[];
-    preferredSkills: string[];
+    skills: SkillItem[];
+    preferredSkills: SkillItem[];
     summary?: string;
     rawContent?: string;
     isExternal?: boolean;
@@ -264,9 +269,9 @@ function JobDetailContent() {
                 <div className="space-y-4">
                   {data.jobDetail.skills.map((skill) => (
                     <SkillWithCourses
-                      key={skill}
-                      skill={skill}
-                      courses={data.matchedCourses.required[skill] || []}
+                      key={skill.display}
+                      skill={skill.display}
+                      courses={data.matchedCourses.required[skill.display] || []}
                       colorClass="blue"
                     />
                   ))}
@@ -293,9 +298,9 @@ function JobDetailContent() {
                 <div className="space-y-4">
                   {data.jobDetail.preferredSkills.map((skill) => (
                     <SkillWithCourses
-                      key={skill}
-                      skill={skill}
-                      courses={data.matchedCourses.preferred[skill] || []}
+                      key={skill.display}
+                      skill={skill.display}
+                      courses={data.matchedCourses.preferred[skill.display] || []}
                       colorClass="green"
                     />
                   ))}
